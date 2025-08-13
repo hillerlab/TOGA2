@@ -5,10 +5,9 @@ Shared functionality across the scripts
 """
 
 from click_option_group import OptionGroup
-from constants import Constants
+from .constants import Constants
 from datetime import datetime
 from shutil import copy2, rmtree
-# from twobitreader import TwoBitFile
 from typing import (
     Any, Dict, Iterable, List, Optional, TextIO, Set, Tuple, Union
 )

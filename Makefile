@@ -52,11 +52,11 @@ check_python:
 	${CHECK_DEPS} python --installation_mode
 
 check_shell:
-    if [ $(echo $0) != "-bash" ]; then \
-        echo "ERROR: TOGA2 currently only supports bash as operating shell. Please change you default shell or create a separate environment with bash as default"; \
-    else \
-        echo "bash has been found to be a default current shell; shell type check successfully passed" ; \
-    fi
+	if [ $(echo $0) != "-bash" ]; then \
+		echo "ERROR: TOGA2 currently only supports bash as operating shell. Please change you default shell or create a separate environment with bash as default"; \
+	else \
+		echo "bash has been found to be a default current shell; shell type check successfully passed" ; \
+	fi
 
 check_third_party:
 	${CHECK_DEPS} third_party
@@ -67,9 +67,9 @@ chmod:
 	for exec in ${EXEC_SCRIPTS}; do \
 		chmod +x src/python/$${exec}; \
 	done ; \
-    for exec in ${EXEC_MODULES}; do \
-        chmod +x src/python/modules/$${exec}; \
-    done
+	for exec in ${EXEC_MODULES}; do \
+		chmod +x src/python/modules/$${exec}; \
+	done
 
 install_binaries:
 	mkdir -p bin && \
@@ -83,26 +83,26 @@ install_binaries:
 	echo ${DELIM}
 
 install_python_packages:
-    if [[ ! -f missing_packages.txt ]] && [[ ${VENV} == false ]]; then \
-        echo "No missing Python packages in the current environment; exiting"; \
-    else \
-        if [[ ${VENV} == true ]]; then \
-            echo "Creating a separate Python environment called ${VENV_NAME}"; \
-            python3 -m venv ${VENV_NAME} && \
-            source ${VENV_NAME}/bin/activate && \
-            python3 -m pip install -r requirements.txt; \
-        else \
-            echo "Installing missing packages globally"; \
-            python3 -m pip install -r missing_packages.txt; \
-        fi; \
-    fi ; \
+	if [[ ! -f missing_packages.txt ]] && [[ ${VENV} == false ]]; then \
+		echo "No missing Python packages in the current environment; exiting"; \
+	else \
+		if [[ ${VENV} == true ]]; then \
+			echo "Creating a separate Python environment called ${VENV_NAME}"; \
+			python3 -m venv ${VENV_NAME} && \
+			source ${VENV_NAME}/bin/activate && \
+			python3 -m pip install -r requirements.txt; \
+		else \
+			echo "Installing missing packages globally"; \
+			python3 -m pip install -r missing_packages.txt; \
+		fi; \
+	fi ; \
 	echo ${DELIM}
 
 install_third_party:
-    if [[ ${VENV} == true ]]; then \
-        source ${VENV_NAME}/bin/activate ; \
-    fi; \
-    ${CHECK_DEPS} install_third_party
+	if [[ ${VENV} == true ]]; then \
+		source ${VENV_NAME}/bin/activate ; \
+	fi; \
+	${CHECK_DEPS} install_third_party
 
 train_models:
 	src/python/train_model.py

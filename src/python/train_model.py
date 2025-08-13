@@ -27,7 +27,7 @@ Unless you're using custom model input and intend to save the models
 at a user-defined directory, please do not move the script around!
 """
 
-DEFAULT_MODEL_DIR: str = os.path.join(get_upper_dir(3), 'models')
+DEFAULT_MODEL_DIR: str = os.path.join(get_upper_dir(__file__, 3), 'models')
 
 DEFAULT_DF: str = os.path.join(DEFAULT_MODEL_DIR, 'train.tsv')
 LD_DF: str = os.path.join(DEFAULT_MODEL_DIR, 'train_long_distance.tsv')
