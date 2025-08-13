@@ -10,7 +10,7 @@ VENV_NAME ?= toga2
 
 all: build
 
-check: check_shell check_essentials check_python check_managers
+check: check_shell check_essentials check_python check_managers check_third_party
 
 build: chmod check install build_c build_cesar build_cython build_rust train_models
 
