@@ -8,9 +8,8 @@ from importlib import import_module
 from importlib.metadata import PackageNotFoundError, version
 from importlib.util import find_spec
 from shutil import which
-from src.python.modules.shared import CONTEXT_SETTINGS
 from typing import (
-    Dict, Iterable, List, Optional, Tuple, Union
+    Any, Dict, Iterable, List, Optional, Tuple, Union
 )
 
 import click
@@ -20,6 +19,15 @@ import sys
 
 __author__ = 'Yury V. Malovichko'
 __year__ = '2025'
+
+CONTEXT_SETTINGS: Dict[str, Any] = {
+    'help_option_names': [
+        '-h', '-help', '--help'
+    ],
+    'ignore_unknown_options': True,
+    'allow_extra_args': True,
+    'max_content_width': 150
+}
 
 ## minimal Python version accepted; so far the lowest tested with T2 was 3.9
 MIN_MINOR_VERSION: int = 9
