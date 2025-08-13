@@ -225,7 +225,7 @@ git clone https://github.com/ariloytynoja/prank-msa.git bin/prank && cd bin/pran
 """
 IQTREE2_INSTALL_CMD: str = """
 wget -P bin/iqtree2 https://github.com/iqtree/iqtree2/releases/download/v2.4.0/iqtree-2.4.0-Linux-intel.tar.gz && \
-    tar -xzvf bin/iqtree2/iqtree-2.4.0-Linux-intel.tar.gz -C /opt/iqtree/
+    tar -xzvf bin/iqtree2/iqtree-2.4.0-Linux-intel.tar.gz -C bin/iqtree2/
 """
 INSTALL_CMDS: Dict[str, str] = {
     'intronIC': INTRONIC_INSTALL_CMD,

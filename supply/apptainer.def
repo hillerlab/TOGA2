@@ -2,11 +2,43 @@ Bootstrap: docker
 From: continuumio/anaconda3 
 Stage: build
 
+%environment
+    export PATH="/opt/conda/bin:/opt/TOGA2:/opt/TOGA2/bin/prank:/opt/TOGA2/bin/iqtree2:/opt/TOGA2/bin/intronIC:$PATH"
+    export SHELL=/bin/bash
+    export NXF_HOME=$TMPDIR/.nextflow
+
 %post
-    echo ""
+
+    ## install curl, Java, and git
+    apt-get update && apt-get install -y \
+        curl \
+        openjdk-17-jdk \
+        git \
+        && rm -rf /var/lib/apt/lists/*
+
+    ## install cargo
+    curl https://sh.rustup.rs -sSf | sh
+
+    ## install Nextflow
+    mkdir -p /opt/nextflow
+    curl -sSL https://get.nextflow.io | bash
+    mv nextflow /opt/nextflow/nextflow
+    chmod +x /opt/nextflow/nextflow
+
+    ## install gcc
+    apt-get -y update
+    apt -y install build-essential
+
+    ## clone the current TOGA2 repo
+    git clone https://github.com/hillerlab/TOGA2 /opt/TOGA2
+    ## build TOGA2, install/update the necessary third-party requirements
+    cd /opt/TOGA2 && make && make install
+
+    ## looks like we're all set
 
 %runscript
-    toga2.py
+    export NXF_HOME=$TMPDIR/.nextflow
+    exec /opt/TOGA2/toga2.py
 
 %labels
     Author SGN Hillerlab
