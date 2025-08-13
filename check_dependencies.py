@@ -225,7 +225,7 @@ MISSING_THIRD_PARTY: str = 'missing_third_party.txt'
 # INTRONIC_INSTALL_CMD: str = 'git clone https://github.com/glarue/intronIC.git bin/intronIC'
 INTRONIC_INSTALL_CMD: str = """
 wget -P bin https://github.com/glarue/intronIC/archive/refs/tags/v1.5.2.tar.gz && \
-tar -xzvf bin/v1.5.2.tar.gz -C bin/intronIC
+tar -xzvf bin/v1.5.2.tar.gz -C bin/ && rm -rf bin/v1.5.2.tar.gz && mv bin/intronIC-1.5.2 bin/intronIC
 """
 SPLICEAI_INSTALL_CMD: str = 'git clone https://github.com/Illumina/SpliceAI.git bin/SpliceAI && cd bin/SpliceAI && python setup.py install'
 PRANK_INSTALL_CMD: str = """
@@ -410,7 +410,7 @@ def check_python(installation_mode: Optional[bool]) -> None:
                             package, version_
                         )
                     )
-                    packages_to_install[pack_name] = ver
+                    packages_to_install[pack_name] = version_
                     break
                 else:
                     click.echo(
