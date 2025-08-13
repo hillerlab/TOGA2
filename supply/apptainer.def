@@ -9,11 +9,12 @@ Stage: build
 
 %post
 
-    ## install curl, Java, and git
+    ## install curl, Java, mailx, and git
     apt-get update && apt-get install -y \
         curl \
         openjdk-17-jdk \
         git \
+        bsd-mailx \
         && rm -rf /var/lib/apt/lists/*
 
     ## install cargo
