@@ -44,11 +44,11 @@ check_essentials:
 	echo ${DELIM}
 
 check_managers:
-	${CHECK_DEPS} managers
+	./${CHECK_DEPS} managers
 	echo ${DELIM}
 
 check_python:
-	${CHECK_DEPS} python --installation_mode
+	./${CHECK_DEPS} python --installation_mode
 
 check_shell:
 	if [ $(echo $0) != "-bash" ]; then \

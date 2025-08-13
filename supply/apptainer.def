@@ -3,7 +3,7 @@ From: continuumio/anaconda3
 Stage: build
 
 %environment
-    export PATH="/opt/conda/bin:/opt/TOGA2:/opt/TOGA2/bin:/opt/TOGA2/bin/prank:/opt/TOGA2/bin/iqtree2:/opt/TOGA2/bin/intronIC:$PATH"
+    export PATH="/$HOME/.cargo/bin:/opt/conda/bin:/opt/TOGA2:/opt/TOGA2/bin:/opt/TOGA2/bin/prank:/opt/TOGA2/bin/iqtree2:/opt/TOGA2/bin/intronIC:$PATH"
     export SHELL=/bin/bash
     export NXF_HOME=$TMPDIR/.nextflow
 
@@ -19,6 +19,7 @@ Stage: build
 
     ## install cargo
     curl https://sh.rustup.rs -sSf | sh
+    . "$HOME/.cargo/env" 
 
     ## install Nextflow
     mkdir -p /opt/nextflow
