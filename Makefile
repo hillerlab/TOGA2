@@ -12,7 +12,7 @@ all: build
 
 check: check_shell check_essentials check_python check_managers
 
-build: chmod check build_c build_cesar build_cython build_rust train_models
+build: chmod check install build_c build_cesar build_cython build_rust train_models
 
 install: install_binaries install_python_packages install_third_party
 

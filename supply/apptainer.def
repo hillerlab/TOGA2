@@ -26,6 +26,7 @@ Stage: build
     curl -sSL https://get.nextflow.io | bash
     mv nextflow /opt/nextflow/nextflow
     chmod +x /opt/nextflow/nextflow
+    export PATH=/opt/nextflow/:$PATH
 
     ## install gcc
     apt-get -y update
@@ -34,7 +35,7 @@ Stage: build
     ## clone the current TOGA2 repo
     git clone https://github.com/hillerlab/TOGA2 /opt/TOGA2
     ## build TOGA2, install/update the necessary third-party requirements
-    cd /opt/TOGA2 && make && make install
+    cd /opt/TOGA2 && make
 
     ## looks like we're all set
 
