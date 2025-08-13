@@ -40,7 +40,7 @@ build_rust:
 	echo ${DELIM}
 
 check_essentials:
-	${CHECK_DEPS} essentials
+	./${CHECK_DEPS} essentials
 	echo ${DELIM}
 
 check_managers:
@@ -58,7 +58,7 @@ check_shell:
 	fi
 
 check_third_party:
-	${CHECK_DEPS} third_party
+	./${CHECK_DEPS} third_party
 
 chmod:
 	chmod +x ${CHECK_DEPS} ; \
@@ -101,7 +101,7 @@ install_third_party:
 	if [[ ${VENV} == true ]]; then \
 		source ${VENV_NAME}/bin/activate ; \
 	fi; \
-	${CHECK_DEPS} install_third_party
+	./${CHECK_DEPS} install_third_party
 
 train_models:
 	src/python/train_model.py
