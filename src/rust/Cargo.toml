@@ -1,0 +1,36 @@
+[package]
+name = "rust"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+anyhow = "1.0.98"
+chaintools = { git = "https://github.com/ReverendCasy/chaintools", version = "0.1.80" }
+clap = { version = "4.5.42", features = ["derive"] }
+cubiculum = "0.1.50"
+flate2 = "1.1.2"
+fxhash = "0.2.1"
+get-size = "0.1.4"
+memchr = "2.7.5"
+num-traits = "0.2.19"
+
+
+[[bin]]
+edition = "2021"
+name = "bed12ToFraction"
+path = "src/bin/bed12ToFraction.rs"
+
+[[bin]]
+edition = "2021"
+name = "chain_filter"
+path = "src/bin/chain_filter.rs"
+
+[[bin]]
+edition = "2021"
+name = "feature_extraction"
+path = "src/bin/feature_extraction.rs"
+
+[[bin]]
+edition = "2021"
+name = "utr_projector"
+path = "src/bin/utr_projector.rs"

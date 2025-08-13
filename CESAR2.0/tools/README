@@ -1,0 +1,2 @@
+This directory contains scripts and tools that are necessary to run the CESAR 2.0 workflow to annotate genes in several genomes.
+The tools are linux 64-bit compiled and mostly come from the UCSC kent source code (written by Jim Kent). Alternatively, compile these tools yourself https://github.com/ucscGenomeBrowser/kent

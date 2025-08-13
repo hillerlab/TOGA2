@@ -1,0 +1,13 @@
+Bootstrap: docker 
+From: continuumio/anaconda3 
+Stage: build
+
+%post
+    echo ""
+
+%runscript
+    toga2.py
+
+%labels
+    Author SGN Hillerlab
+    Version 1.0

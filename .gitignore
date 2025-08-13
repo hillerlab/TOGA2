@@ -3,6 +3,14 @@ __pycache__/
 *.py[codz]
 *$py.class
 
+# temporary, legacy, and lab-internal code
+_toga2.py
+patch_scripts/
+extra/
+
+# compiled Rust code
+src/rust/target/*
+
 # C extensions
 *.so
 
