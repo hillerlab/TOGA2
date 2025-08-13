@@ -32,6 +32,9 @@ Stage: build
     apt-get -y update
     apt -y install build-essential
 
+    ## facilitate installation by removing conflicting packages
+    python3 -m pip uninstall -y gensim numba datashader
+
     ## clone the current TOGA2 repo
     git clone https://github.com/hillerlab/TOGA2 /opt/TOGA2
     ## build TOGA2, install/update the necessary third-party requirements

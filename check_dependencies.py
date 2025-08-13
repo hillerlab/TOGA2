@@ -79,6 +79,7 @@ PACKAGES: Dict[str, Tuple[str, str]] = {
     'h5py': ('h5py', '3.12.1'),
     'click': ('click', '8.1.8'),
     'click-option-group': ('click_option_group', '0.5.6'),
+    'contourpy': ('contourpy', '1.2.1'),
     'tensorflow': ('tensorflow', '2.8.0')
 }
 
