@@ -92,7 +92,7 @@ install_python_packages:
 			python3 -m pip install -r requirements.txt; \
 		else \
 			echo "Installing missing packages globally"; \
-			python3 -m pip install -r missing_packages.txt --root-user-action; \
+			python3 -m pip install -r missing_packages.txt --root-user-action=ignore; \
 		fi; \
 	fi ; \
 	echo ${DELIM}
