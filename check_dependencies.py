@@ -392,6 +392,7 @@ def check_python(installation_mode: Optional[bool]) -> None:
                 click.echo(
                     'WARNING: Module %s is not installed for the current Python version' % package
                 )
+                packages_to_install[pack_name] = version_
                 continue
         try:
             ver: str = version(package)
