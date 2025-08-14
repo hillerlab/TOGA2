@@ -72,7 +72,8 @@ PACKAGES: Dict[str, Tuple[str, str]] = {
     'xgboost': ('xgboost', '3.0.0'), 
     'joblib': ('joblib', '1.4.2'), 
     'numpy': ('numpy', '2.2.5'), 
-    'pandas': ('pandas', '2.2.3'), 
+    'pandas': ('pandas', '2.2.3'),
+    'numexpr': ('numexpr', '2.8.1'),
     'scikit-learn': ('sklearn', '1.7.1'), 
     'scipy': ('scipy', '1.15.2'),
     'Cython': ('cython', '3.0.12'), 
@@ -80,7 +81,7 @@ PACKAGES: Dict[str, Tuple[str, str]] = {
     'click': ('click', '8.1.8'),
     'click-option-group': ('click_option_group', '0.5.6'),
     'contourpy': ('contourpy', '1.2.1'),
-    'tensorflow': ('tensorflow', '2.8.0')
+    'tensorflow': ('tensorflow', '2.8.0'),
 }
 
 class ThirdPartyChecker:
