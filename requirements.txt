@@ -1,6 +1,6 @@
 numpy==2.2.5 
 pandas==2.2.3
-numexpr==2.8.1 
+numexpr==2.11.0 
 joblib==1.4.2
 scikit-learn==1.7.1 
 scipy==1.15.2 
