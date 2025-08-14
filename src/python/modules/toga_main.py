@@ -4,8 +4,8 @@ TOGA2 main class
 
 from collections import defaultdict
 from contextlib import nullcontext
-from constants import Constants, TOGA2_SLOTS, TOGA2_SLOT2ARG
-from shared import (
+from .constants import Constants, TOGA2_SLOTS, TOGA2_SLOT2ARG
+from .shared import (
     CommandLineManager, dir_name_by_date, get_upper_dir, hex_dir_name
 )
 from pathlib import Path
