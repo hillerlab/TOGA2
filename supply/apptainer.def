@@ -34,6 +34,9 @@ Stage: build
 
     ## facilitate installation by removing conflicting packages
     python3 -m pip uninstall -y gensim numba datashader
+    python3 -m pip install streamlit --upgrade
+    python3 -m pip install pyarrow --upgrade
+    python3 -m pip install bottleneck --upgrade
 
     ## clone the current TOGA2 repo
     git clone https://github.com/hillerlab/TOGA2 /opt/TOGA2
