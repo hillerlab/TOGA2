@@ -10,7 +10,7 @@ from cesar_wrapper_executables import * ## TODO: Same!
 from collections import defaultdict
 from logging import Logger
 from math import floor
-from shared import nn, parts, safe_div
+from .shared import nn, parts, safe_div
 from typing import (
     Any, Dict, Iterable, List, Optional, Set, Tuple, TypeVar, Union
 )
