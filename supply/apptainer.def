@@ -47,7 +47,8 @@ Stage: build
 
 %runscript
     export NXF_HOME=$TMPDIR/.nextflow
-    exec /opt/TOGA2/toga2.py "$@"
+    cd /opt/TOGA2/ && ls && ls models
+    exec toga2.py "$@"
 
 %labels
     Author SGN Hillerlab
