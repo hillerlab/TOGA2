@@ -1,3 +1,9 @@
+## v2.0.9
+* `run` mode:
+* `prepare-input` mode:
+    * Annotation and isoform file generation from GFF3/GTF files;
+* **NEW MODE**: `orthogroups` enables orthogroup modelling and generates gene family files compatible with CAFE5 input;
+
 ## v2.0.8
 * `run` mode:
     * All eight CESAR2 profiles can be now provided as a single input directory with the `--cesar_profile_dir` argument.
