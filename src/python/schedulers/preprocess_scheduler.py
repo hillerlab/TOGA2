@@ -130,6 +130,7 @@ class PreprocessingScheduler(CommandLineManager):
         "toga1",
         "toga1_plus_cesar",
         "v",
+        "debug",
     ]
 
     def __init__(
@@ -190,9 +191,11 @@ class PreprocessingScheduler(CommandLineManager):
         toga1_plus_corrected_cesar: Optional[bool] = False,
         log_name: Optional[Union[str, None]] = None,
         verbose: Optional[bool] = False,
+        debug: Optional[bool] = False,
     ) -> None:
         """ """
         self.v: bool = verbose
+        self.debug: bool = debug
         self.set_logging(log_name)
 
         self.job_directory: click.Path = job_directory
@@ -342,11 +345,11 @@ class PreprocessingScheduler(CommandLineManager):
                 chains[: self.max_chain_number],
                 chains[self.max_chain_number :],
             )
-            self._to_log(
-                f"Number of chains for transcript {tr} exceeds the set "
-                f"chain number limit {self.max_chain_number}; "
-                "dropping the excessive chains",
-                "warning",
+            self._debug(
+                (
+                    "Number of chains for transcript %s exceeds the set "
+                    "chain number limit %i; dropping the excessive chains",
+                ) %  (tr, self.max_chain_number)
             )
         else:
             relevant, dropped = chains, []
@@ -411,10 +414,11 @@ class PreprocessingScheduler(CommandLineManager):
                     continue
                 if self.paralogs_over_spanning:
                     if par:
-                        self._to_log(
-                            f"No orthologs or spanning chains found for transcript {tr}; "
-                            "processing paralogs instead",
-                            "warning",
+                        self._debug(
+                            (
+                                "No orthologs or spanning chains found for transcript %s; "
+                                "processing paralogs instead"
+                            ) % tr
                         )
                         self._add_chain2trs(tr, par, paralogs=True)
                     elif spanning:
@@ -423,10 +427,11 @@ class PreprocessingScheduler(CommandLineManager):
                     if spanning:
                         self._add_chain2trs(tr, spanning)
                     else:
-                        self._to_log(
-                            f"No orthologs or spanning chains found for transcript {tr}; "
-                            "processing paralogs instead",
-                            "warning",
+                        self._debug(
+                            (
+                                "No orthologs or spanning chains found for transcript %s; "
+                                "processing paralogs instead"
+                            ) % tr
                         )
                         self._add_chain2trs(tr, par, paralogs=True)
 
@@ -1129,6 +1134,15 @@ class PreprocessingScheduler(CommandLineManager):
     show_default=True,
     help="Controls the execution verbosity",
 )
+@click.option(
+    "--debug",
+    is_flag=True,
+    default=False,
+    show_default=True,
+    help=""""Increases execution verbosity for debugging purpose; 
+automatically set the --verbose flag on"""
+)
+
 def main(**kwargs) -> None:
     PreprocessingScheduler(**kwargs)
 

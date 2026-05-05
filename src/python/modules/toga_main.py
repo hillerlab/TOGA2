@@ -2243,7 +2243,8 @@ class TogaMain(CommandLineManager):
             "rejection_report": self.final_rejection_log,
             "log_name": self.project_id,
             "bigwig2wig_binary": self.bigwig2wig_binary,
-            "verbose": True,
+            "verbose": self.v,
+            "debug": self.debug,
         }
         if self.toga1 and not self.toga1_plus_cesar:
             kwargs["toga1_compatible"] = True
