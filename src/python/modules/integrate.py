@@ -33,6 +33,8 @@ BIN: str = os.path.join(TOGA2_ROOT, "bin")
 DEFAULT_BIGBED2BED: str = os.path.join(BIN, "bigBedToBed")
 LOCATION: str = os.path.dirname(os.path.abspath(__file__))
 MAKE_IX_SCRIPT: str = os.path.join(LOCATION, "get_names_from_bed.py")
+TOGA2_DIR: str = get_upper_dir(__file__, 4)
+GTF_SCRIPT: str = os.path.join(TOGA2_DIR, "bed2gtf", "target", "release", "bed2gtf")
 
 ALL: str = "ALL"
 BED_FIELD_NUM: int = 12
@@ -219,6 +221,8 @@ class AnnotationIntegrator(CommandLineManager):
         "decorator_schema",
         "chrom_sizes",
         "bed_index",
+        "query_gtf",
+        "query_genes_for_gtf",
         "v",
     )
 
@@ -288,6 +292,8 @@ class AnnotationIntegrator(CommandLineManager):
         self.gene_tsv: str = os.path.join(output, "query_genes.tsv")
         self.gene_bed: str = os.path.join(output, "query_genes.bed")
         self.projection_bed: str = os.path.join(output, "query_annotation.bed")
+        self.query_gtf: str = os.path.join(output, "query_annotation.gtf")
+        self.query_genes_for_gtf: str = os.path.join(output, "query_genes.for_gtf.tsv")
         self.ucsc_dir: str = os.path.join(output, "ucsc_browser_files")
 
         self.protein_file: str = os.path.join(output, "protein.fa.gz")
@@ -307,6 +313,7 @@ class AnnotationIntegrator(CommandLineManager):
         self.process()
         self.infer_genes()
         self.pick_best_isoforms()
+        self.prepare_gtf()
         if not self.skip_ucsc:
             self._mkdir(self.ucsc_dir)
         self.prepare_ucsc_file()
@@ -319,9 +326,6 @@ class AnnotationIntegrator(CommandLineManager):
             self.read_exon_meta(species)
             self.read_ref_isoforms(species)
             self.get_overlapping_genes(species)
-            ## the fol
-            # self.read_paralogs(species)
-            # self.read_ppgenes(species)
 
     def _check_binaries(self) -> None:
         """
@@ -1093,6 +1097,34 @@ class AnnotationIntegrator(CommandLineManager):
                         # for proj_bed in proj.return_bed_line(prefix=species):
                         for proj_bed in proj.return_bed_line():
                             qb.write(proj_bed + "\n")
+
+    def prepare_gtf(self) -> None:
+        """
+        Converts the BED annotation file into the GTF format and compresses the resulting file
+
+        Args:
+            None
+        
+        Returns:
+            None
+        """
+        from .isoforms_for_gtf import ProvisionalIsoformMapper
+        ProvisionalIsoformMapper(
+            [
+                self.gene_tsv,
+                self.projection_bed,
+                self.query_genes_for_gtf,
+                "-ln",
+                "integrate",
+            ],
+            standalone_mode=False,
+        )
+        gtf_cmd: str = (
+            f"{GTF_SCRIPT} -b {self.projection_bed} -i {self.query_genes_for_gtf} "
+            f"-o {self.query_gtf} && gzip -5 -f {self.query_gtf}"
+        )
+        _ = self._exec(gtf_cmd, "Converting integrated annotation into GTF format failed:")
+        self._rm(self.query_genes_for_gtf)
 
     def prepare_ucsc_file(self) -> None:
         """
