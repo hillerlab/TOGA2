@@ -97,8 +97,8 @@ In addition, TOGA2 identified {num_lost} genes classified as lost and {num_missi
 
 Out of {ref_gene_num} reference genes, {num_with_func_orth} ({perc_with_func_orth}%) have at least one potentially functional ortholog; of these, {num_one2one} ({perc_one2one}%) are classified as 1:1 orthologs. For {num_with_func_para} ({perc_with_func_para}%) genes, TOGA2 identified only potentially functional paralogs in the query genome.
 
-#HEADER	QueryAssembly	no. annotated query genes	no. query retrogenes	no. lost genes in query	no. missing genes in query	no. ref genes with potentially functional orthologs no. one2one orthologs	no. ref genes with potentially functional paralogs
-#SINGLELINESUMMARY   {query_name} {num_genes} {num_retro} {num_lost}  {num_missing}   {num_with_func_orth}  {num_one2one} {num_with_func_para}
+#HEADER\tQueryAssembly\tno. annotated query genes  \tno. query retrogenes\tno. lost genes in query\tno. missing genes in query\tno. ref genes with potentially functional orthologs\tno. one2one orthologs\tno. ref genes with potentially functional paralogs
+#SINGLELINESUMMARY\t{query_name}\t{num_genes}\t{num_retro}\t{num_lost}\t{num_missing}\t{num_with_func_orth}\t{num_one2one}\t{num_with_func_para}
 
 This data set was generated with TOGA2 version {version} and the following input files:
 * Reference genome: {ref_2bit}
