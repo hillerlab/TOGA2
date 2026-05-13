@@ -1883,6 +1883,14 @@ by combining annotation with different references""",
     show_default=True,
     help="A path to a directory to save the results to",
 )
+@out_options(
+    "--query_name",
+    type=str,
+    metavar="QUERY_NAME",
+    default="query",
+    show_default=True,
+    help="Query assembly/species name to use in the summary file"
+)
 @integration_options.option(
     "--accepted_statuses",
     "-l",
@@ -2150,6 +2158,17 @@ Relevant if PRANK aligner is selected""",
         "to check whether the found orthologs comply with this loss status. If not set, all projections listed "
         "in the orthology classification file are considered"
     ),
+)
+@loss_options.option(
+    "--use_one2zeros",
+    is_flag=True,
+    default=False,
+    show_default=True,
+    help=(
+        "If set, the best orthologous (i.e., non-paralogous, non-retrogene) projection "
+        "is used for transcripts rendered 1:0 in the query. If more than one projection corresponds to "
+        "the highest loss status, the query is excluded from the analysis as usual"
+    )
 )
 @aligner_options.option(
     "--aligner",
