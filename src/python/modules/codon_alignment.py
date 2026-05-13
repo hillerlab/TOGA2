@@ -15,7 +15,7 @@ from ete3 import Tree
 
 from .cesar_wrapper_constants import CLASS_TO_NUM, LOSS_STATUSES
 from .constants import Headers
-from .shared import CommandLineManager, hex_code
+from .shared import CommandLineManager, get_proj2trans, hex_code
 
 __author__ = "Yury V. Malovichko"
 __credits__ = "Bernhard Bein"
@@ -49,6 +49,8 @@ MUSCLE_LETTERCONF_CMD: str = "muscle -letterconf {} -ref {} -output {}"
 # MUSCLE_ADDCONF_CMD: str = 'muscle -addconfseq {} -output {}'
 DEV_NULL: str = "/dev/null"
 ALN_ERROR: str = "Alignment with {} for transcript {}, exon {}, failed"
+ONE2ZERO: str = "one2zero"
+PROJECTION: str = "PROJECTION"
 
 
 def filter_by_posterior(
@@ -94,6 +96,7 @@ class CodonAligner(CommandLineManager):
         "ref_exon_path",
         "ref_name",
         "loss_statuses",
+        "use_one2zeros",
         "confidence_threshold",
         "muscle_threads",
         "tree",
@@ -150,6 +153,7 @@ class CodonAligner(CommandLineManager):
         reference_exons: Optional[Union[click.Path, None]],
         reference_name: Optional[Union[str, None]],
         accepted_loss_status: Optional[Union[str, None]],
+        use_one2zeros: Optional[bool],
         confidence_threshold: Optional[int],
         aligner: Optional[str],
         aligner_exe: Optional[Union[click.Path, None]],
@@ -177,6 +181,7 @@ class CodonAligner(CommandLineManager):
         self.loss_statuses: Union[Tuple[str], None] = self.parse_loss_status(
             accepted_loss_status
         )
+        self.use_one2zeros: bool = use_one2zeros
         self.confidence_threshold: int = confidence_threshold
         self.muscle_threads: int = muscle_threads
         self.aligner: str = aligner
@@ -244,14 +249,27 @@ class CodonAligner(CommandLineManager):
             )
         non_missing_queries: int = 0
         for i, line in enumerate(input_dirs):
+            skip_loss_check: bool = False
             path: str = line.rstrip()
             if not path:
                 continue
             species: str = (
                 path.rstrip(os.sep).split(os.sep)[-1].replace("vs_", "")
             )  # s.path.basename(path).replace('vs_', '')
-            projection_names: List[str] = self.get_orthologs(path)
+            projection_names, is_one2zero = self.get_orthologs(path)
             num_proj_found: int = len(projection_names)
+            if not num_proj_found and self.use_one2zeros and is_one2zero:
+                projection_names = self.best_candidate_in_loss_file(path)
+                num_proj_found: int = len(projection_names)
+                if num_proj_found > 1:
+                    self._to_log(
+                        (
+                            "Multiple one2zero projections for query %s; "
+                            "excluding it from the analysis"
+                        ) % species,
+                        "warning"
+                    )
+                    num_proj_found = 0
             if not num_proj_found:
                 self._to_log("No projections found for species %s" % species, "warning")
                 for exon in self.exon2length:
@@ -276,7 +294,7 @@ class CodonAligner(CommandLineManager):
             if ref_found:
                 self.ref_name = species
             rejected: bool = False
-            if self.loss_statuses:
+            if self.loss_statuses and not skip_loss_check:
                 # accepted_loss_status: bool = self.check_loss_status(path, proj)
                 # if not accepted_loss_status:
                 #     self._to_log(
@@ -368,7 +386,7 @@ class CodonAligner(CommandLineManager):
             "twoBitToFa executable was not found in PATH, with no default path provided"
         )
 
-    def get_orthologs(self, path: str) -> List[str]:
+    def get_orthologs(self, path: str) -> Tuple[List[str], bool]:
         """
         Gets the one:one and many:one projection names for the focal transcript and a given query
         """
@@ -379,6 +397,7 @@ class CodonAligner(CommandLineManager):
                 % path
             )
         out_projs: List[str] = []
+        is_one2zero: bool = False
         with open(table_file, "r") as h:
             for i, line in enumerate(h, start=1):
                 if line == Headers.ORTHOLOGY_TABLE_HEADER:
@@ -394,10 +413,64 @@ class CodonAligner(CommandLineManager):
                     continue
                 orth_status: str = data[4]
                 if orth_status not in SINGLE_COPY_CLASSES:
+                    if orth_status == ONE2ZERO:
+                        is_one2zero = True
                     continue
                 proj_name: str = data[3]
                 out_projs.append(proj_name)
-        return out_projs
+        return out_projs, is_one2zero
+
+    def best_candidate_in_loss_file(self, path: str) -> List[str]:
+        """
+        Picks the best non-functional isoform from the loss file.
+
+        Args:
+            path: a path to the input directory
+
+        Returns:
+            A list containing a single projection name, or an empty list if either no 
+            or multiple projections were found
+        """
+        loss_file: str = os.path.join(path, LOSS_FILE)
+        if not os.path.exists(loss_file):
+            self._die(
+                "File %s is missing from the input directory %s" % (LOSS_FILE, path)
+            )
+        out_list: List[str] = []
+        curr_status: str = ""
+        with open(loss_file, "r") as h:
+            for i, line in enumerate(h, start=1):
+                line = line.rstrip()
+                if line == Headers.LOSS_FILE_HEADER:
+                    continue
+                data: List[str] = line.split("\t")
+                if not data or not data[0]:
+                    continue
+                if len(data) < 3:
+                    self._die(
+                        "Improperly formatting found in file %s at line %i"
+                        % (loss_file, i)
+                    )
+                if data[0] != PROJECTION:
+                    continue
+                tr: str = get_proj2trans(data[1])[0]
+                if tr != self.transcript:
+                    continue
+                if "#paralog" in data[1] or "#retro" in data[1]:
+                    continue
+                if not out_list:
+                    out_list.append(data[1])
+                    curr_status = data[2]
+                    continue
+                status: int = CLASS_TO_NUM[data[2]]
+                prev_status: int = CLASS_TO_NUM[curr_status]
+                if status == prev_status:
+                    out_list.append(data[1])
+                if status > prev_status:
+                    out_list = [data[1]]
+                    curr_status = data[2]
+        return out_list
+
 
     # def check_loss_status(self, path: str, proj: str) -> bool:
     def check_loss_status(self, path: str, projections: List[str]) -> Dict[str, str]:
