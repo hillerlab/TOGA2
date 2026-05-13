@@ -2599,6 +2599,13 @@ def test(output: Optional[click.Path]) -> None:
     show_default=True,
     help="Overwrite output files if they already exist",
 )
+@control_flow_options.option(
+    "--one-to-one",
+    is_flag=True,
+    default=False,
+    show_default=True,
+    help="Only write list of one-to-one orthologs",
+)
 @misc_options.option(
     "--include_ul",
     "-ul",
@@ -2608,22 +2615,20 @@ def test(output: Optional[click.Path]) -> None:
     help="Include UL (Uncertain Loss) transcripts when filtering by loss status",
 )
 @qc_options.option(
-    "--z_threshold",
-    "-z",
+    "--span_z",
     type=float,
     metavar="FLOAT",
     default=3.0,
     show_default=True,
-    help="Z-score threshold for per-species copy-number outlier detection",
+    help="SpanZ threshold for spanning-rate outlier detection (default: 3.0)",
 )
 @qc_options.option(
-    "--outlier_fraction",
-    "-of",
-    type=click.FloatRange(min=0.0, max=1.0),
+    "--fam_z",
+    type=float,
     metavar="FLOAT",
-    default=0.05,
+    default=3.0,
     show_default=True,
-    help="Maximum outlier family fraction before a species is flagged",
+    help="FamZ threshold for copy-number family outlier detection (default: 3.0)",
 )
 @qc_options.option(
     "--no_qc",
@@ -2661,9 +2666,9 @@ def orthogroups(**kwargs) -> None:
 
     \b
     Output files (written to --output directory):
-      TOGA2.orthogroups.tsv  — copy-number count table (CAFE5-compatible)
-      TOGA2.ortho_map.tsv    — full orthogroup membership per family
-      (prefix changes to PANTHER when --panther is provided)
+      orthogroups_matrix.tsv  — copy-number count table (CAFE5-compatible)
+      orthogroups_map.tsv     — full orthogroup membership per family
+      one2one.lst             - list of one-to-one orthologs across all species (optional)
     """
     from src.python.modules.toga2orthogroups import run as _run
 
@@ -2672,7 +2677,7 @@ def orthogroups(**kwargs) -> None:
     _handler.setFormatter(logging.Formatter("%(message)s"))
     _log.addHandler(_handler)
     _log.propagate = False
-    if kwargs.get("verbose"):
+    if kwargs.pop("verbose", False):
         _log.setLevel(logging.DEBUG)
     _run(**kwargs)
 
