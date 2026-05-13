@@ -373,11 +373,10 @@ process execute_jobs {{
 }}
 
 workflow {{
-    if (params.joblist == "NONE"){{
+    if (params.joblist == "NONE") {{
         println("Usage: nextflow execute_joblist.nf  --joblist [joblist file] -c [config file]")
-        System.exit(2);
+        System.exit(2)
     }}
-
     lines = Channel.fromPath(params.joblist).splitText()
     execute_jobs(lines)
 }}"""

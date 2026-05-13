@@ -17,6 +17,7 @@ import argparse
 import csv
 import logging
 import sys
+import time
 from pathlib import Path
 from collections import defaultdict
 from dataclasses import dataclass, field
@@ -31,6 +32,12 @@ __github__ = "https://github.com/michelealbertini30"
 # Module-level logger
 log = logging.getLogger(__name__)
 
+# QC: FamZ
+_FAMILY_COUNT_Z = 3.0       # |z| threshold for flagging a species in a single family
+_MAX_ZERO_FRAC = 0.5        # skip families where >= this fraction of species have 0 copies
+
+# QC: SpanZ
+_MIN_SPAN_SPECIES = lambda n: max(3, min(n // 3, 10))   # min species-with-genes for a scoreable family
 
 # ---------------------------------------------------------------------------
 # Union-Find
@@ -40,7 +47,7 @@ log = logging.getLogger(__name__)
 # Core architecture:
 #   - Every reference gene starts as its own singleton component
 #   - For each query species, an inverted index is built: query gene -> ref genes
-#   - If a query genes shares multiple ref genes, those get unioned in the same component
+#   - If a query gene shares multiple ref genes, those get unioned in the same component
 #   - This is repeated for all species, modifying the same components
 #   - After all species are processed, connected components are extracted (orthogroups)
 
@@ -161,6 +168,8 @@ class Orthogroups:
     ref_gene_to_family: dict[str, str]
     # Full set of autosomal reference genes
     reference_genes: set[str]
+    # ref_gene -> set of "species|query_gene" orthologs (family-level QC)
+    ref_gene_orthologs: dict[str, set[str]] = field(default_factory=dict)
 
 
 # ---------------------------------------------------------------------------
@@ -207,7 +216,7 @@ def load_reference_genes(
 
     with open(isoforms_path) as fh:
         reader = csv.reader(fh, delimiter="\t")
-        header = next(reader, None)
+        next(reader, None)
         for row in reader:
             if len(row) < 2:
                 continue
@@ -239,7 +248,7 @@ def load_species_orthologs(
     """Load orthology data filtered by loss status.
 
     Only keeps relationships where the query transcript loss status is
-    FI/I/PI and UL (if -ul argument in provided).
+    FI/I/PI, and additionally UL if --include-ul is provided.
     """
     toga_dir = Path(toga_dir)
     species_dir = toga_dir / species
@@ -307,12 +316,12 @@ def build_orthogroups(
     isoforms_path: str | Path | None = None,
     include_ul: bool = False,
 ) -> Orthogroups:
-    """Build gene families using Union-Find in two passes.
+    """Build gene families using Union-Find over reference genes.
 
-    Pass 1 — within-species orthogroups
-    Pass 2 — across-species merging
-
-    Optionally, PANTHER family assignments add additional ref->ref edges.
+    For each query species, reference genes that share any query ortholog are
+    unioned into the same component. Cross-species families emerge naturally
+    as a single Union-Find structure.Optionally, PANTHER assignments add
+    extra ref→ref edges before components are extracted.
 
     Returns an Orthogroups object with family memberships and a mapping from
     reference genes to family IDs.
@@ -350,11 +359,7 @@ def build_orthogroups(
                 for rg in ref_list[1:]:
                     uf.union(anchor, rg)
 
-        n_merged = sum(1 for refs in query_to_refs.values() if len(refs) > 1)
-        log.debug(
-            "  %s: %d query genes shared by multiple ref genes",
-            spe, n_merged,
-        )
+        log.debug("  %s: %d query genes", spe, len(query_to_refs))
 
     # --- Optional PANTHER merge ---
     gene_to_panther: dict[str, str] = {}
@@ -406,6 +411,7 @@ def build_orthogroups(
         families=families,
         ref_gene_to_family=ref_gene_to_family,
         reference_genes=ref_genes.genes,
+        ref_gene_orthologs=dict(ref_gene_orthologs),
     )
 
 
@@ -492,7 +498,7 @@ def generate_count_table(
         counts: dict[str, int] = {sp: 0 for sp in species_list}
         for member in members:
             if "|" in member:
-                sp, _qg = member.split("|", 1)
+                sp = member.split("|", 1)[0]
                 if sp in counts:
                     counts[sp] += 1
 
@@ -535,95 +541,217 @@ def write_orthogroup_membership(
 # ---------------------------------------------------------------------------
 
 def species_qc_diagnostics(
-    header: list[str],
-    rows: list[list],
+    orthogroups: Orthogroups,
     species_list: list[str],
-    z_threshold: float = 3.0,
-    outlier_family_fraction: float = 0.05,
+    span_z: float = 3.0,
+    fam_z: float = 3.0,
     output=None,
 ) -> dict[str, dict]:
-    """Detect species with inflated orthogroup sizes.
+    """Detect species with low orthology resolution via two complementary signals.
 
-    For each gene family, compute per-species z-scores of copy number
-    relative to the cross-species distribution for that family.  A species
-    is flagged if its proportion of z-score outlier families exceeds
-    outlier_family_fraction.
+    SpanZ — spanning-rate signal:
+        SumZ = Sum of per family sum(n_refs_spanned - 1) / total queries per species z-scores.
+        SpanZ = Z-score of SumZ across species.
+        
+        Family filtering:
+        - Skipped if fewer than max(3, min(n//3, 10)) species have genes, or var==0.
 
-    z_threshold : families where higher z are counted as outliers
-    outlier_family_fraction : species are flagged if their outlier
-        proportion exceeds this
+    FamZ — copy-number signal:
+        Per family, z-score raw copy counts across all species.
+        Count families where a species is a count outlier (|z| > _FAMILY_COUNT_Z).
+        Z-score those counts across species → FamZ.
+        
+        Family filtering:
+        - Skipped if fewer than 50% of species have genes or var==0
+
+    Flag a species if SpanZ > span_z OR FamZ > fam_z.
 
     Returns
     -------
-    dict mapping species -> {outlier_count, outlier_fraction, flagged}
+    dict mapping species -> {flagged_count, count_scoreable,
+                             fam_z, span_z, flagged}
     """
-    # Default output target is stderr so QC text doesn't pollute stdout
     if output is None:
         output = sys.stderr
 
-    # Map each species name to its column index in the count table.
-    sp_indices = {sp: i for i, sp in enumerate(species_list)}
-    n_sp = len(species_list)
+    n_total = len(species_list)
 
-    count_matrix: list[list[int]] = [
-        [row[sp_indices[sp] + 1] for sp in species_list] for row in rows
-    ]
-    n_families = len(count_matrix)
+    min_fam_species = _MIN_SPAN_SPECIES(n_total)
 
-    # Compute per-family z-scores across species.
-    z_scores: list[list[float]] = []
-    for fam_row in count_matrix:
-        mean_val = sum(fam_row) / n_sp
-        # Sample variance (divide by n-1) to be conservative.
-        var_val = sum((x - mean_val) ** 2 for x in fam_row) / (n_sp - 1) if n_sp > 1 else 0.0
-        std_val = sqrt(var_val) if var_val > 0 else inf
-        z_scores.append([(x - mean_val) / std_val for x in fam_row])
+    sp_set = set(species_list)
 
-    # For each species, count how many families it is an outlier in.
+    # Invert ref_gene_to_family to iterate families by their ref genes.
+    family_to_refs: dict[str, list[str]] = defaultdict(list)
+    for rg, fid in orthogroups.ref_gene_to_family.items():
+        family_to_refs[fid].append(rg)
+
+    # --- Spanning-rate → SpanZ ---
+    # Capture species with high spanning depth over ref genes -> orthogroup inflation
+    sum_z: dict[str, float] = defaultdict(float)
+    n_scoreable_span = 0
+
+    for _, ref_genes_fam in family_to_refs.items():
+        # Skip singleton families
+        if len(ref_genes_fam) < 2:
+            continue
+
+        # Build inverted index: query_gene -> {ref_genes}.
+        query_to_refs: dict[str, set[str]] = defaultdict(set)
+        for rg in ref_genes_fam:
+            for sq in orthogroups.ref_gene_orthologs.get(rg, set()):
+                query_to_refs[sq].add(rg)
+
+        # sp_weighted accumulates (n_refs - 1) for every spanning query gene
+        sp_total: dict[str, int] = defaultdict(int)
+        sp_weighted: dict[str, float] = defaultdict(float)
+        for sq, refs in query_to_refs.items():
+            sp = sq.split("|", 1)[0]
+            if sp not in sp_set:
+                continue
+            sp_total[sp] += 1
+            if len(refs) > 1:
+                sp_weighted[sp] += len(refs) - 1
+
+        # Require at least min_fam_species species with genes for a stable z-score.
+        present = [sp for sp in species_list if sp_total.get(sp, 0) > 0]
+        if len(present) < min_fam_species:
+            continue
+
+        rates = {
+            sp: sp_weighted.get(sp, 0.0) / sp_total[sp]
+            for sp in present
+        }
+        vals = list(rates.values())
+        mean_r = sum(vals) / len(vals)
+        var_r = sum((v - mean_r) ** 2 for v in vals) / (len(vals) - 1)
+
+        # Skip families where all species have the same spanning rate
+        if var_r == 0.0:
+            continue
+
+        n_scoreable_span += 1
+        std_r = sqrt(var_r)
+
+        # Accumulate positive z-scores (inflation)
+        for sp in present:
+            z = (rates[sp] - mean_r) / std_r
+            sum_z[sp] += max(0.0, z)
+
+    # Cross-species z-score of SumZ values → SpanZ.
+    sum_z_vals = [sum_z.get(sp, 0.0) for sp in species_list]
+    grand_mean_span = sum(sum_z_vals) / n_total if n_total > 0 else 0.0
+    var_span = sum((v - grand_mean_span) ** 2 for v in sum_z_vals) / (n_total - 1) if n_total > 1 else 0.0
+    span_std = sqrt(var_span) if var_span > 0 else inf
+
+    # --- Copy-number outlier count → FamZ ---
+    # Capture assembly artefacts (M, L) or inflated one-to-many
+    n_count_flagged: dict[str, int] = defaultdict(int)
+    n_count_scoreable = 0
+    n_families = len(orthogroups.families)
+    n_one2one = 0
+
+    for members in orthogroups.families.values():
+        # Count query genes per species in this family.
+        sp_counts: dict[str, int] = {sp: 0 for sp in species_list}
+        for m in members:
+            if "|" in m:
+                sp = m.split("|", 1)[0]
+                if sp in sp_counts:
+                    sp_counts[sp] += 1
+
+        # One-to-one check: every species has exactly 1 copy.
+        if all(sp_counts[sp] == 1 for sp in species_list):
+            n_one2one += 1
+
+        vals_c = [sp_counts[sp] for sp in species_list]
+
+        # Skip zero-inflated families.
+        n_zero = sum(1 for v in vals_c if v == 0)
+        if n_zero / n_total >= _MAX_ZERO_FRAC:
+            continue
+
+        # Skip families with no copy-number variation.
+        mean_c = sum(vals_c) / n_total
+        var_c = sum((v - mean_c) ** 2 for v in vals_c) / (n_total - 1) if n_total > 1 else 0.0
+        if var_c == 0.0:
+            continue
+
+        n_count_scoreable += 1
+        std_c = sqrt(var_c)
+
+        # Flag species deviating from _FAMILY_COUNT_Z
+        for sp in species_list:
+            if abs((sp_counts[sp] - mean_c) / std_c) > _FAMILY_COUNT_Z:
+                n_count_flagged[sp] += 1
+
+    # Cross-species z-score of n_count_flagged → FamZ.
+    count_flagged_vals = [n_count_flagged.get(sp, 0) for sp in species_list]
+    grand_mean_cf = sum(count_flagged_vals) / n_total if n_total > 0 else 0.0
+    var_cf = sum((v - grand_mean_cf) ** 2 for v in count_flagged_vals) / (n_total - 1) if n_total > 1 else 0.0
+    fam_std = sqrt(var_cf) if var_cf > 0 else inf
+
+    # --- Flag species based on two metric results ---
     results: dict[str, dict] = {}
     flagged_species: list[str] = []
 
     for sp in species_list:
-        col = sp_indices[sp]
-        outlier_count = sum(1 for zrow in z_scores if abs(zrow[col]) > z_threshold)
-        outlier_frac = outlier_count / n_families if n_families > 0 else 0.0
-        flagged = outlier_frac > outlier_family_fraction
+        # SpanZ
+        sz = sum_z.get(sp, 0.0)
+        span_z_val = (sz - grand_mean_span) / span_std if span_std != inf else 0.0
 
+        # FamZ
+        cf = n_count_flagged.get(sp, 0)
+        fam_z_val = (cf - grand_mean_cf) / fam_std if fam_std != inf else 0.0
+
+        # Flag on either signal exceeding its respective threshold.
+        flagged = span_z_val > span_z or fam_z_val > fam_z
         results[sp] = {
-            "outlier_count": outlier_count,
-            "outlier_fraction": round(outlier_frac, 4),
+            "flagged_count": cf,
+            "count_scoreable": n_count_scoreable,
+            "fam_z": round(fam_z_val, 3),
+            "span_z": round(span_z_val, 3),
             "flagged": flagged,
         }
         if flagged:
             flagged_species.append(sp)
 
-    # One-to-one orthologs: families where every species has exactly 1 copy.
-    n_one2one = sum(1 for fam_row in count_matrix if all(x == 1 for x in fam_row))
-
-    # --- Print formatted report ---
+    # --- Formatted report to stderr ---
     output.write("\n=== Species QC Diagnostics ===\n")
-    output.write(f"  z-score threshold: {z_threshold}\n")
-    output.write(f"  outlier family fraction threshold: {outlier_family_fraction}\n")
-    output.write(f"  one2one orthologs: {n_one2one}\n")
-    output.write(f"  total families: {n_families}\n\n")
-    output.write(f"  {'Species':<25} {'Outliers':>8} {'Fraction':>10} {'Flag':>6}\n")
-    output.write(f"  {'-'*25} {'-'*8} {'-'*10} {'-'*6}\n")
+    output.write(f"  span-z threshold: {span_z}\n")
+    output.write(f"  fam-z threshold:  {fam_z}\n")
+    output.write(f"  one-to-one orthologs: {n_one2one}\n")
+    output.write(f"  total families: {n_families}\n")
+    output.write(f"  scored families (spanning): {n_scoreable_span}\n")
+    output.write(
+        f"  {'Species':<25} {'FlagFam':>12} {'FamZ':>8} {'SpanZ':>8} {'Flag':>6}\n"
+    )
+    output.write(f"  {'-'*25} {'-'*12} {'-'*8} {'-'*8} {'-'*6}\n")
 
     for sp in species_list:
         r = results[sp]
+        flagfam_str = f"{r['flagged_count']}/{n_count_scoreable}"
         flag_str = " ***" if r["flagged"] else ""
         output.write(
-            f"  {sp:<25} {r['outlier_count']:>8} {r['outlier_fraction']:>10.4f}"
-            f" {flag_str:>6}\n"
+            f"  {sp:<25} {flagfam_str:>12} {r['fam_z']:>8.3f} {r['span_z']:>8.3f} {flag_str:>6}\n"
         )
 
+    span_flagged = [sp for sp in flagged_species if results[sp]["span_z"] > span_z]
+    fam_flagged  = [sp for sp in flagged_species if results[sp]["fam_z"] > fam_z and results[sp]["span_z"] <= span_z]
+
+    if span_flagged:
+        output.write(f"\n  WARNING: {len(span_flagged)} species flagged as potential orthogroup inflators (span_z > {span_z}):\n")
+        for sp in span_flagged:
+            r = results[sp]
+            output.write(f"    - {sp}: span_z={r['span_z']:.2f}\n")
+
+    if fam_flagged:
+        output.write(f"\n  WARNING: {len(fam_flagged)} species flagged for abnormal copy-number estimates (fam_z > {fam_z}):\n")
+        for sp in fam_flagged:
+            r = results[sp]
+            output.write(f"    - {sp}: fam_z={r['fam_z']:.2f} ({r['flagged_count']}/{n_count_scoreable} families)\n")
+
     if flagged_species:
-        output.write(f"\n  WARNING: {len(flagged_species)} species flagged with high orthogroup variance:\n")
-        for sp in flagged_species:
-            output.write(
-                f"    - {sp}: {results[sp]['outlier_fraction']:.1%} of families are outliers. "
-                f"Consider re-running without this species.\n"
-            )
+        output.write("\n  Consider re-running without these species.\n")
     else:
         output.write("\n  No species flagged.\n")
 
@@ -657,19 +785,19 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "-t", "--toga-dir",
         required=True,
         metavar="DIR",
-        help="directory with per-species TOGA2 output subdirs",
+        help="Directory with per-species TOGA2 output subdirs",
     )
     req.add_argument(
         "-s", "--species-list",
         required=True,
         metavar="FILE",
-        help="newline separated list of species",
+        help="Newline separated list of species",
     )
     req.add_argument(
         "-b", "--transcripts-bed",
         required=True,
         metavar="FILE",
-        help="reference transcript BED file",
+        help="Reference transcript BED file",
     )
     req.add_argument(
         "-i", "--isoforms",
@@ -681,56 +809,68 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "-o", "--out-dir",
         required=True,
         metavar="DIR",
-        help="output directory",
+        help="Output directory",
     )
 
     opt = app.add_argument_group("optional")
     opt.add_argument(
         "-f", "--force",
         action="store_true",
-        help="overwrite output files if they already exist",
+        help="Overwrite output files if they already exist",
     )
     opt.add_argument(
         "-v", "--verbose",
         action="store_true",
-        help="print per-species processing stats",
+        help="Print per-species processing stats",
     )
     opt.add_argument(
         "-ul", "--include-ul",
         action="store_true",
-        help="include UL (Uncertain Loss) transcripts",
+        help="Include UL (Uncertain Loss) transcripts",
+    )
+    opt.add_argument(
+        "--one-to-one",
+        action="store_true",
+        help="Only write list of one-to-one orthologs",
     )
     opt.add_argument(
         "--panther",
         metavar="FILE",
         default=None,
-        help="panther database",
+        help="PANTHER database flat file; if provided, enables PANTHER-guided family merging",
     )
 
     qc = app.add_argument_group("QC")
     qc.add_argument(
-        "-z",
-        "--z-threshold",
+        "--span-z",
         type=float,
         metavar="FLOAT",
         default=3.0,
-        help="z-score threshold for outlier detection  (default: 3.0)",
+        help="SpanZ threshold for spanning-rate outlier detection",
     )
     qc.add_argument(
-        "-of",
-        "--outlier-fraction",
+        "--fam-z",
         type=float,
         metavar="FLOAT",
-        default=0.05,
-        help="max outlier family fraction for flagging  (default: 0.05)",
+        default=3.0,
+        help="FamZ threshold for family copy-number outlier detection",
     )
     qc.add_argument(
         "--no-qc",
         action="store_true",
-        help="skip species QC diagnostics",
+        help="Skip species QC diagnostics",
     )
 
     return app.parse_args(argv)
+
+
+def _log_elapsed(t0: float) -> None:
+    elapsed = time.perf_counter() - t0
+    if elapsed < 60:
+        log.info("\nTime elapsed: %.1fs", elapsed)
+    else:
+        m, s = divmod(int(elapsed), 60)
+        log.info("\nTime elapsed: %dm %ds", m, s)
 
 
 def run(
@@ -740,37 +880,41 @@ def run(
     isoforms: str,
     out_dir: str,
     force: bool = False,
-    verbose: bool = False,
     include_ul: bool = False,
     panther: str | None = None,
-    z_threshold: float = 3.0,
-    outlier_fraction: float = 0.05,
+    span_z: float = 3.0,
+    fam_z: float = 3.0,
     no_qc: bool = False,
+    one_to_one: bool = False,
 ) -> None:
     """Core runner — called by both the argparse main() and the Click subcommand.
 
-    Filesystem I/O, orthogroup building, and QC happen here.
+    Running: Filesystem I/O, orthogroup building, and QC.
     Logging is configured by the caller before invoking this function.
     """
+    t0 = time.perf_counter()
+    log.info("\n=== Running toga2orthogroups ===")
+
     # --- Resolve output directory and expected file paths ---
     _out_dir = Path(out_dir)
-    prefix = "PANTHER" if panther else "TOGA2"
-    out_tsv = _out_dir / f"{prefix}.orthogroups.tsv"
-    out_map = _out_dir / f"{prefix}.ortho_map.tsv"
 
     # Create output directory if it doesn't exist.
     _out_dir.mkdir(parents=True, exist_ok=True)
 
-    # Check for existing output files unless --force is set.
-    if not force:
-        existing = [f for f in (out_tsv, out_map) if f.exists()]
-        if existing:
-            log.error(
-                "Output file(s) already exist: %s\n"
-                "Use -f / --force to overwrite.",
-                ", ".join(str(f) for f in existing),
-            )
-            sys.exit(1)
+    if not one_to_one:
+        out_tsv = _out_dir / "orthogroups_matrix.tsv"
+        out_map = _out_dir / "orthogroups_map.tsv"
+
+        # Check for existing output files unless --force is set.
+        if not force:
+            existing = [f for f in (out_tsv, out_map) if f.exists()]
+            if existing:
+                log.error(
+                    "Output file(s) already exist: %s\n"
+                    "Use -f / --force to overwrite.",
+                    ", ".join(str(f) for f in existing),
+                )
+                sys.exit(1)
 
     # --- Load species list ---
     # One species name per line; tab-separated lines are also accepted
@@ -786,7 +930,7 @@ def run(
     ref_genes = load_reference_genes(isoforms, transcripts_bed)
 
     # --- Build orthogroups ---
-    if panther:
+    if panther and not one_to_one:
         log.info("Running in PANTHER mode...")
         orthogroups = build_orthogroups(
             ref_genes, species_list, toga_dir,
@@ -797,9 +941,38 @@ def run(
     else:
         orthogroups = build_orthogroups(
             ref_genes, species_list, toga_dir,
-            panther_path=None, isoforms_path=None,
             include_ul=include_ul,
         )
+
+    # --- One-to-one mode: alternative output only ---
+    if one_to_one:
+        out_lst = _out_dir / "one2one.lst"
+        if not force and out_lst.exists():
+            log.error("Output file already exists: %s\nUse -f / --force to overwrite.", out_lst)
+            sys.exit(1)
+
+        # Build family_id -> [ref_genes] from the inverse mapping.
+        family_to_refs: dict[str, list[str]] = defaultdict(list)
+        for rg, fid in orthogroups.ref_gene_to_family.items():
+            family_to_refs[fid].append(rg)
+
+        one2one_genes: list[str] = []
+        for fid, members in orthogroups.families.items():
+            sp_counts: dict[str, int] = defaultdict(int)
+            for m in members:
+                if "|" in m:
+                    sp, _ = m.split("|", 1)
+                    sp_counts[sp] += 1
+            if all(sp_counts.get(sp, 0) == 1 for sp in species_list):
+                one2one_genes.extend(family_to_refs.get(fid, []))
+
+        one2one_genes.sort()
+        with open(out_lst, "w") as fh:
+            for g in one2one_genes:
+                fh.write(g + "\n")
+        log.info("Wrote one-to-one list: %s (%d genes)", out_lst, len(one2one_genes))
+        _log_elapsed(t0)
+        return
 
     header, rows = generate_count_table(orthogroups, species_list)
     write_count_table(header, rows, out_tsv)
@@ -807,17 +980,19 @@ def run(
 
     if not no_qc:
         species_qc_diagnostics(
-            header, rows, species_list,
-            z_threshold=z_threshold,
-            outlier_family_fraction=outlier_fraction,
+            orthogroups, species_list,
+            span_z=span_z,
+            fam_z=fam_z,
         )
+
+    _log_elapsed(t0)
 
 
 def main(argv: list[str] | None = None) -> None:
     args = parse_args(argv)
 
-    # Configure logging.
-    # With --verbose: DEBUG level with per-species stats.
+    # --- Configure logging ---
+    # With --verbose: DEBUG log level with per-species stats.
     logging.basicConfig(format="%(message)s", stream=sys.stderr)
     logging.getLogger().setLevel(logging.DEBUG if args.verbose else logging.INFO)
 
@@ -828,12 +1003,12 @@ def main(argv: list[str] | None = None) -> None:
         isoforms=args.isoforms,
         out_dir=args.out_dir,
         force=args.force,
-        verbose=args.verbose,
         include_ul=args.include_ul,
         panther=args.panther,
-        z_threshold=args.z_threshold,
-        outlier_fraction=args.outlier_fraction,
+        span_z=args.span_z,
+        fam_z=args.fam_z,
         no_qc=args.no_qc,
+        one_to_one=args.one_to_one,
     )
 
 
