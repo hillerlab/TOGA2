@@ -1883,7 +1883,7 @@ by combining annotation with different references""",
     show_default=True,
     help="A path to a directory to save the results to",
 )
-@out_options(
+@out_options.option(
     "--query_name",
     type=str,
     metavar="QUERY_NAME",
