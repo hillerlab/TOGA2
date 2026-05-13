@@ -1187,10 +1187,10 @@ class AnnotationIntegrator(CommandLineManager):
                         # if gene in _all_names:
                         #     print(f"DUPLICATE: {gene=}, {minor_component=}, {minor_components=}")
                         # _all_names.add(gene)
-                    gene_name2counter[gene] += 1
-                    if gene_name2counter[gene] > 1:
-                        gene += f"_{gene_name2counter[gene]}"
                     name: str = prefix + gene
+                    gene_name2counter[name] += 1
+                    if gene_name2counter[name] > 1:
+                        name += f"_{gene_name2counter[name]}"
                     all_species: Set[str] = {self.query_proj2ref[x] for x in minor_component.nodes()}
                     self.gene2species[name] = all_species
                     for _spec in all_species:
@@ -1504,17 +1504,17 @@ class AnnotationIntegrator(CommandLineManager):
                 )
             prot_gzipped: bool = prot_file.endswith(".gz")
             with (
-                gzip.open(prot_file, "rb") if prot_gzipped else open(prot_file, "r")
+                gzip.open(prot_file, "rt") if prot_gzipped else open(prot_file, "r")
             ) as h:
                 prot_seqs: List[str] = self._read_fasta(h, ref)
             nuc_gzipped: bool = nuc_file.endswith(".gz")
-            with gzip.open(nuc_file, "rb") if nuc_gzipped else open(nuc_file, "r") as h:
+            with gzip.open(nuc_file, "rt") if nuc_gzipped else open(nuc_file, "r") as h:
                 nuc_seqs: List[str] = self._read_fasta(h, ref)
-            write_mode: str = "a" if seq_files_recorded else "w"
-            with open(self.protein_file, write_mode) as h:
+            gzip_mode: str = "at" if seq_files_recorded else "wt"
+            with gzip.open(self.protein_file, gzip_mode) as h:
                 for entry in prot_seqs:
                     h.write(entry + "\n")
-            with open(self.nucleotide_file, write_mode) as h:
+            with gzip.open(self.nucleotide_file, gzip_mode) as h:
                 for entry in nuc_seqs:
                     h.write(entry + "\n")
             seq_files_recorded = True
@@ -1535,7 +1535,7 @@ class AnnotationIntegrator(CommandLineManager):
                 header = ""
                 seq = ""
                 proj: str = base_proj_name(line.split()[0]).lstrip(">")
-                if proj not in self.final_projections:
+                if f"{ref}.{proj}" not in self.final_projections:
                     continue
                 header = proj
             elif header:
