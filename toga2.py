@@ -2639,7 +2639,7 @@ def test(output: Optional[click.Path]) -> None:
     metavar="FLOAT",
     default=3.0,
     show_default=True,
-    help="OrthoZ threshold for spanning-rate outlier detection (default: 3.0)",
+    help="OrthoZ threshold for orthogroup inflation detection (default: 3.0)",
 )
 @qc_options.option(
     "--fam_z",

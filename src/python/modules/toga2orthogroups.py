@@ -846,7 +846,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         type=float,
         metavar="FLOAT",
         default=3.0,
-        help="OrthoZ threshold for spanning-rate outlier detection",
+        help="OrthoZ threshold for orthogroup inflation detection",
     )
     qc.add_argument(
         "--fam-z",
