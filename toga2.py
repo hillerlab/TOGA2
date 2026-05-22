@@ -2634,12 +2634,12 @@ def test(output: Optional[click.Path]) -> None:
     help="Include UL (Uncertain Loss) transcripts when filtering by loss status",
 )
 @qc_options.option(
-    "--span_z",
+    "--ortho_z",
     type=float,
     metavar="FLOAT",
     default=3.0,
     show_default=True,
-    help="SpanZ threshold for spanning-rate outlier detection (default: 3.0)",
+    help="OrthoZ threshold for orthogroup inflation detection (default: 3.0)",
 )
 @qc_options.option(
     "--fam_z",
