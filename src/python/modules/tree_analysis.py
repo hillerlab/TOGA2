@@ -1,20 +1,14 @@
 import os
 import sys
-from collections import Counter
 
 # from io import StringIO
 from typing import List, Optional, Tuple, Union
 
 from Bio import Phylo
-from Bio.Phylo.TreeConstruction import DistanceMatrix, DistanceTreeConstructor
 
 __author__ = "Amy Stephen"
-__credits__ = "Yury V. Malovichko"
+__credits__ = ("Yury V. Malovichko",)
 __year__ = "2024"
-
-ENSEMBL_PATH = "/beegfs/home/astephen/resolveTOGA/files/human_mouse_homologs.tsv"
-# ENSEMBL_PATH = '/beegfs/home/astephen/resolveTOGA/files/human_bosTau9_homologs.tsv'
-# ENSEMBL_PATH = '/beegfs/home/astephen/resolveTOGA/files/human_panTro6_homologs.tsv'
 
 """
 D = 0
@@ -71,15 +65,15 @@ def special_case(tree, bootthresh: float, iqtree: bool = False):
     special case: when we could resolve into 2 one2ones but the bootstrap score is low - have to do an extra check
     some bootstrap scores are implicit so this checks in 2 one2ones case bootstrap > threshold
     """
-    count = 0
-    remove = []
+    count: int = 0
+    remove: List[str] = []
     attr: str = "confidence" if iqtree else "comment"
     # count number of S
     for clade in list(tree.find_clades()):
         # print(f'{clade=}, {clade.root=}')
         # print(f'{clade.name=}, {clade.is_terminal()=}, {clade.comment=}, {clade.confidence=}, {clade.__getattribute__(attr)=}, {iqtree=}, {bootthresh=}')
         if clade.name == "S":
-            count = count + 1
+            count += 1
     # only checks for specific case
     if count == 3:
         # if any(clade.comment is not None and int(clade.comment)<int(bootthresh) for clade in tree.find_clades()):
@@ -188,7 +182,7 @@ def do_dir(d, bootthresh):
             res = can_resolve(tree, bootthresh)
             out_name = msa_x + "_" + bootthresh + "_ensemblout.txt"
             # compare against ensembl
-            check_ensembl(res, ENSEMBL_PATH, out_name)
+            # check_ensembl(res, ENSEMBL_PATH, out_name)
 
 
 def process(
