@@ -36,7 +36,7 @@ log = logging.getLogger(__name__)
 _FAMILY_COUNT_Z = 3.0       # |z| threshold for flagging a species in a single family
 _MAX_ZERO_FRAC = 0.5        # skip families where >= this fraction of species have 0 copies
 
-# QC: SpanZ
+# QC: OrthoZ
 _MIN_SPAN_SPECIES = lambda n: max(3, min(n // 3, 10))   # min species-with-genes for a scoreable family
 
 # ---------------------------------------------------------------------------
@@ -543,15 +543,15 @@ def write_orthogroup_membership(
 def species_qc_diagnostics(
     orthogroups: Orthogroups,
     species_list: list[str],
-    span_z: float = 3.0,
+    ortho_z: float = 3.0,
     fam_z: float = 3.0,
     output=None,
 ) -> dict[str, dict]:
     """Detect species with low orthology resolution via two complementary signals.
 
-    SpanZ — spanning-rate signal:
+    OrthoZ — spanning-rate signal:
         SumZ = Sum of per family sum(n_refs_spanned - 1) / total queries per species z-scores.
-        SpanZ = Z-score of SumZ across species.
+        OrthoZ = Z-score of SumZ across species.
         
         Family filtering:
         - Skipped if fewer than max(3, min(n//3, 10)) species have genes, or var==0.
@@ -564,12 +564,12 @@ def species_qc_diagnostics(
         Family filtering:
         - Skipped if fewer than 50% of species have genes or var==0
 
-    Flag a species if SpanZ > span_z OR FamZ > fam_z.
+    Flag a species if OrthoZ > ortho_z OR FamZ > fam_z.
 
     Returns
     -------
     dict mapping species -> {flagged_count, count_scoreable,
-                             fam_z, span_z, flagged}
+                             fam_z, ortho_z, flagged}
     """
     if output is None:
         output = sys.stderr
@@ -585,7 +585,7 @@ def species_qc_diagnostics(
     for rg, fid in orthogroups.ref_gene_to_family.items():
         family_to_refs[fid].append(rg)
 
-    # --- Spanning-rate → SpanZ ---
+    # --- Spanning-rate → OrthoZ ---
     # Capture species with high spanning depth over ref genes -> orthogroup inflation
     sum_z: dict[str, float] = defaultdict(float)
     n_scoreable_span = 0
@@ -637,7 +637,7 @@ def species_qc_diagnostics(
             z = (rates[sp] - mean_r) / std_r
             sum_z[sp] += max(0.0, z)
 
-    # Cross-species z-score of SumZ values → SpanZ.
+    # Cross-species z-score of SumZ values → OrthoZ.
     sum_z_vals = [sum_z.get(sp, 0.0) for sp in species_list]
     grand_mean_span = sum(sum_z_vals) / n_total if n_total > 0 else 0.0
     var_span = sum((v - grand_mean_span) ** 2 for v in sum_z_vals) / (n_total - 1) if n_total > 1 else 0.0
@@ -695,21 +695,21 @@ def species_qc_diagnostics(
     flagged_species: list[str] = []
 
     for sp in species_list:
-        # SpanZ
+        # OrthoZ
         sz = sum_z.get(sp, 0.0)
-        span_z_val = (sz - grand_mean_span) / span_std if span_std != inf else 0.0
+        ortho_z_val = (sz - grand_mean_span) / span_std if span_std != inf else 0.0
 
         # FamZ
         cf = n_count_flagged.get(sp, 0)
         fam_z_val = (cf - grand_mean_cf) / fam_std if fam_std != inf else 0.0
 
         # Flag on either signal exceeding its respective threshold.
-        flagged = span_z_val > span_z or fam_z_val > fam_z
+        flagged = ortho_z_val > ortho_z or fam_z_val > fam_z
         results[sp] = {
             "flagged_count": cf,
             "count_scoreable": n_count_scoreable,
             "fam_z": round(fam_z_val, 3),
-            "span_z": round(span_z_val, 3),
+            "ortho_z": round(ortho_z_val, 3),
             "flagged": flagged,
         }
         if flagged:
@@ -717,13 +717,13 @@ def species_qc_diagnostics(
 
     # --- Formatted report to stderr ---
     output.write("\n=== Species QC Diagnostics ===\n")
-    output.write(f"  span-z threshold: {span_z}\n")
+    output.write(f"  span-z threshold: {ortho_z}\n")
     output.write(f"  fam-z threshold:  {fam_z}\n")
     output.write(f"  one-to-one orthologs: {n_one2one}\n")
     output.write(f"  total families: {n_families}\n")
     output.write(f"  scored families (spanning): {n_scoreable_span}\n")
     output.write(
-        f"  {'Species':<25} {'FlagFam':>12} {'FamZ':>8} {'SpanZ':>8} {'Flag':>6}\n"
+        f"  {'Species':<25} {'FlagFam':>12} {'FamZ':>8} {'OrthoZ':>8} {'Flag':>6}\n"
     )
     output.write(f"  {'-'*25} {'-'*12} {'-'*8} {'-'*8} {'-'*6}\n")
 
@@ -732,17 +732,17 @@ def species_qc_diagnostics(
         flagfam_str = f"{r['flagged_count']}/{n_count_scoreable}"
         flag_str = " ***" if r["flagged"] else ""
         output.write(
-            f"  {sp:<25} {flagfam_str:>12} {r['fam_z']:>8.3f} {r['span_z']:>8.3f} {flag_str:>6}\n"
+            f"  {sp:<25} {flagfam_str:>12} {r['fam_z']:>8.3f} {r['ortho_z']:>8.3f} {flag_str:>6}\n"
         )
 
-    span_flagged = [sp for sp in flagged_species if results[sp]["span_z"] > span_z]
-    fam_flagged  = [sp for sp in flagged_species if results[sp]["fam_z"] > fam_z and results[sp]["span_z"] <= span_z]
+    span_flagged = [sp for sp in flagged_species if results[sp]["ortho_z"] > ortho_z]
+    fam_flagged  = [sp for sp in flagged_species if results[sp]["fam_z"] > fam_z and results[sp]["ortho_z"] <= ortho_z]
 
     if span_flagged:
-        output.write(f"\n  WARNING: {len(span_flagged)} species flagged as potential orthogroup inflators (span_z > {span_z}):\n")
+        output.write(f"\n  WARNING: {len(span_flagged)} species flagged as potential orthogroup inflators (ortho_z > {ortho_z}):\n")
         for sp in span_flagged:
             r = results[sp]
-            output.write(f"    - {sp}: span_z={r['span_z']:.2f}\n")
+            output.write(f"    - {sp}: ortho_z={r['ortho_z']:.2f}\n")
 
     if fam_flagged:
         output.write(f"\n  WARNING: {len(fam_flagged)} species flagged for abnormal copy-number estimates (fam_z > {fam_z}):\n")
@@ -842,11 +842,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
     qc = app.add_argument_group("QC")
     qc.add_argument(
-        "--span-z",
+        "--ortho-z",
         type=float,
         metavar="FLOAT",
         default=3.0,
-        help="SpanZ threshold for spanning-rate outlier detection",
+        help="OrthoZ threshold for orthogroup inflation detection",
     )
     qc.add_argument(
         "--fam-z",
@@ -882,7 +882,7 @@ def run(
     force: bool = False,
     include_ul: bool = False,
     panther: str | None = None,
-    span_z: float = 3.0,
+    ortho_z: float = 3.0,
     fam_z: float = 3.0,
     no_qc: bool = False,
     one_to_one: bool = False,
@@ -981,7 +981,7 @@ def run(
     if not no_qc:
         species_qc_diagnostics(
             orthogroups, species_list,
-            span_z=span_z,
+            ortho_z=ortho_z,
             fam_z=fam_z,
         )
 
@@ -1005,7 +1005,7 @@ def main(argv: list[str] | None = None) -> None:
         force=args.force,
         include_ul=args.include_ul,
         panther=args.panther,
-        span_z=args.span_z,
+        ortho_z=args.ortho_z,
         fam_z=args.fam_z,
         no_qc=args.no_qc,
         one_to_one=args.one_to_one,
