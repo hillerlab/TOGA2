@@ -1447,10 +1447,10 @@ class AnnotationIntegrator(CommandLineManager):
                 for data in read_tab(output.split("\n")):
                     name_field: str = data[12]
                     name: str = ":".join(name_field.split(":")[2:])
+                    name = f"{ref}.{name}"
                     basename: str = base_proj_name(name)
                     if basename not in self.final_projections:
                         continue
-                    name = f"{ref}.{name}"
                     # data[3] = name
                     data[12] = ":".join([*name_field.split(":")[:2], name])
                     line = "\t".join(data)
