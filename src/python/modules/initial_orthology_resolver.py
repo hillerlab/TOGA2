@@ -317,7 +317,10 @@ def undefined_only(record: str) -> bool:
     contains only undefined symbols
     """
     seq: str = record.split("\n")[-1]
-    return all(x in ("X", "x", "*") for x in seq)
+    # return all(x in ("X", "x", "*") for x in seq)
+    all_symbols: int = len(seq)
+    undefined_symbols: int = sum(x in ("X", "x", "*") for x in seq)
+    return undefined_symbols >= all_symbols * 0.9
 
 
 def is_homopolymer(record: str) -> bool:
@@ -326,7 +329,7 @@ def is_homopolymer(record: str) -> bool:
     comprises of a single repetitive residue. A workaround for known PRANK behavior
     in the presence of homopolymer sequences
     """
-    seq: str = record.split("\n")
+    seq: str = record.split("\n")[-1]
     return len(set(seq)) < 2
 
 
