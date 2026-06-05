@@ -867,3 +867,7 @@ class CommandLineManager:
             self._die(msg)
         if gather_stdout:
             return stdout.decode("utf8")
+
+    def _symlink(self, from_: os.PathLike, to_: os.PathLike) -> None:
+        cmd: str = f"ln -s {from_} {to_}"
+        self._exec(cmd, "Symlink creation failed:")
