@@ -692,7 +692,7 @@ class QueryGeneCollapser(CommandLineManager):
         """
         chrom2tr_coords: Dict[str, List[Tuple[str, int, int]]] = defaultdict(list)
         for line in ref_isoform_file:
-            data: List[str] = line.rstrip().split()
+            data: List[str] = line.rstrip().split("\t")
             if not data or not data[0]:
                 continue
             gene, tr = data
