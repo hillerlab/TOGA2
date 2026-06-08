@@ -1240,7 +1240,7 @@ class CesarPreprocessor(CommandLineManager):
 
     def correct_projection_boundaries(
         self, proj: Tuple[int, int], tr: str, group: int
-    ) -> Tuple[int]:
+    ) -> Union[ProjectionCoverageData, None]:
         """
         Corrects search boundaries for a given projection
         """
@@ -2029,13 +2029,20 @@ class CesarPreprocessor(CommandLineManager):
                         for k, v in Counter(self.rejection_reasons[tr][proj]).items()
                     ]
                 )
-                report: str = RejectionReasons.PREPROCESSING_REJ.format(
-                    f"{tr}#{','.join(self.chains)}",
-                    proj,
-                    msg,
-                    ";".join(reason_col),
-                    status,
-                )
+                if reason_col:
+                    reason_col = ";".join(reason_col)
+                    report: str = RejectionReasons.PREPROCESSING_REJ.format(
+                        f"{tr}#{','.join(self.chains)}",
+                        proj,
+                        msg,
+                        reason_col,
+                        status,
+                    )
+                else:
+                    report: str = RejectionReasons.NO_ALIGNED_EXON_REJ.format(
+                        f"{tr}#{','.join(self.chains)}",
+                        status
+                    )
                 h.write(report + "\n")
 
     def spanning_chain_report(self) -> None:
