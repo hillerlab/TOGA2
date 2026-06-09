@@ -509,6 +509,15 @@ from individual chains""",
     help="If set, only transcript with a single orthologous projection are considered",
 )
 @gene_select_options.option(
+    "--annotate_paralogs",
+    "-aP",
+    is_flag=True,
+    default=False,
+    show_default=True,
+    help="""If set, paralogous projections are considered for annotation 
+even in the presence of orthologous predictions""",
+)
+@gene_select_options.option(
     "--paralogs_over_spanning",
     "-p_first",
     is_flag=True,

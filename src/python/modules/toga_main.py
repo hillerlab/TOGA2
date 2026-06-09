@@ -96,6 +96,7 @@ class TogaMain(CommandLineManager):
         disable_fragment_assembly: Optional[bool],
         orthologs_only: Optional[bool],
         one2ones_only: Optional[bool],
+        annotate_paralogs: Optional[bool],
         paralogs_over_spanning: Optional[bool],
         enable_spanning_chains: Optional[bool],
         annotate_processed_pseudogenes: Optional[bool],
@@ -237,6 +238,7 @@ class TogaMain(CommandLineManager):
         self.annotate_ppgenes: bool = annotate_processed_pseudogenes
         self.orthologs_only: bool = orthologs_only
         self.one2ones_only: bool = one2ones_only
+        self.annotate_paralogs: bool = annotate_paralogs
         self.paralogs_over_spanning: bool = paralogs_over_spanning
         self.enable_spanning_chains: bool = enable_spanning_chains
 
@@ -2260,6 +2262,8 @@ class TogaMain(CommandLineManager):
             kwargs.append["orthologs_only"] = True
         if self.one2ones_only:
             kwargs["one2one_only"] = True
+        if self.annotate_paralogs:
+            kwargs["annotate_paralogs"] = True
         if self.paralogs_over_spanning:
             kwargs["paralogs_over_spanning"] = True
         if not self.enable_spanning_chains:
