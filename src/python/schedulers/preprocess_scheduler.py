@@ -88,6 +88,7 @@ class PreprocessingScheduler(CommandLineManager):
         "orthologs_only",
         "one2one_only",
         "paralogs_over_spanning",
+        "annotate_paralogs",
         "parallel_execution",
         "twobit2fa_binary",
         "disable_spanning_chains",
@@ -153,6 +154,7 @@ class PreprocessingScheduler(CommandLineManager):
         orthologs_only: Optional[bool] = False,
         one2one_only: Optional[bool] = False,
         paralogs_over_spanning: Optional[bool] = False,
+        annotate_paralogs: Optional[bool] = False,
         parallel_execution: Optional[bool] = False,
         disable_spanning_chains: Optional[bool] = False,
         no_inference: Optional[bool] = False,
@@ -220,6 +222,7 @@ class PreprocessingScheduler(CommandLineManager):
         self.orthologs_only: bool = orthologs_only
         self.one2one_only: bool = one2one_only
         self.paralogs_over_spanning: bool = paralogs_over_spanning
+        self.annotate_paralogs: bool = annotate_paralogs
         self.parallel_execution: bool = parallel_execution
         self.disable_spanning_chains: bool = disable_spanning_chains
         self.no_inference: bool = no_inference
@@ -333,7 +336,11 @@ class PreprocessingScheduler(CommandLineManager):
         ## presto!
 
     def _add_chain2trs(
-        self, tr: str, chains: List[str], paralogs: bool = False, ppgenes: bool = False
+        self, 
+        tr: str, 
+        chains: List[str], 
+        paralogs: bool = False,
+        ppgenes: bool = False
     ) -> None:
         """
         For each chain in an iterable of chains, adds the transcript to a value
@@ -348,8 +355,8 @@ class PreprocessingScheduler(CommandLineManager):
             self._debug(
                 (
                     "Number of chains for transcript %s exceeds the set "
-                    "chain number limit %i; dropping the excessive chains",
-                ) %  (tr, self.max_chain_number)
+                    "chain number limit %i; dropping the excessive chains"
+                ) % (tr, self.max_chain_number)
             )
         else:
             relevant, dropped = chains, []
@@ -411,6 +418,8 @@ class PreprocessingScheduler(CommandLineManager):
                     self._add_chain2trs(tr, ppgenes, ppgenes=True)
                 if orth:
                     self._add_chain2trs(tr, orth)
+                    if par and self.annotate_paralogs:
+                        self._add_chain2trs(tr, par, paralogs=True)
                     continue
                 if self.paralogs_over_spanning:
                     if par:
