@@ -23,6 +23,9 @@ MANY2MANY: str = "many2many"
 NONE: str = "None"
 ONE2MANY: str = "one2many"
 T_GENE: str = "t_gene"
+ZEE: int = 26
+BACKTICK: int = 96
+MAX_LEGAL_COPY_NUM: int = 300
 
 
 @click.command(context_settings=CONTEXT_SETTINGS, no_args_is_help=True)
@@ -178,7 +181,7 @@ class QueryGeneNamer(CommandLineManager):
     ) -> None:
         self.v: bool = verbose
         self.log_file: Union[str, None] = log_file
-        self.set_logging(log_name)
+        self.set_logging(name=log_name, toga_module="query_gene_naming")
 
         self._to_log("Creating output directory for orthology wrap-up")
         self._mkdir(output_dir)
@@ -302,7 +305,9 @@ class QueryGeneNamer(CommandLineManager):
                     for ref_gene in ref_gene_names:
                         if status == ONE2MANY:
                             one2many_naming[ref_gene] += 1
-                            ref_gene += f"_{chr(96 + one2many_naming[ref_gene])}"
+                            suff: str = self._one2many_suffix(one2many_naming[ref_gene], ref_gene)
+                            # ref_gene += f"_{chr(96 + one2many_naming[ref_gene])}"
+                            ref_gene += f"_{suff}"
                         elif status == MANY2MANY:
                             many2many_naming[ref_gene] += 1
                             ref_gene += f"_{many2many_naming[ref_gene]}"
@@ -474,6 +479,32 @@ class QueryGeneNamer(CommandLineManager):
                     gene_name: str = self.gene2new_name[old_name]
                 data[3] = gene_name
                 h.write("\t".join(data) + "\n")
+
+
+    def _one2many_suffix(self, num: int, name: str) -> str:
+        """
+        Returns the one-letter suffix for one2many genes
+
+        Args:
+            num: Current gene number in the co-ortholog family
+            name: Reference gene name
+
+        Returns:
+            Letter a-z if number is equal to or lower than 26, a binary combination of {a-z}{a-z} otherwise
+
+        Fails:
+            If a number of copies exceeds the maximal allowed copy number
+        """
+        if num <= ZEE:
+            return chr(BACKTICK + num)
+        if num >= MAX_LEGAL_COPY_NUM:
+            self._die(
+                "Maximum one2many copy number (%i) exceeded for gene %s (%i genes found)" % 
+                (MAX_LEGAL_COPY_NUM, name, num)
+            )
+        first_letter: int = chr(BACKTICK + num // ZEE)
+        last_letter: int = chr(BACKTICK + num % ZEE + int(num // ZEE > 1))
+        return first_letter + last_letter
 
 
 if __name__ == "__main__":

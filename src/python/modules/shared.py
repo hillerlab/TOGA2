@@ -33,7 +33,8 @@ SPLIT_JOB_HEADER: Tuple[str, str, str] = ("#!/bin/bash", "set -eu", "set -o pipe
 SLIB_NAME = "chain_bst_lib.so"
 UTF8: str = "utf-8"
 FORMATTER: Formatter = Formatter(
-    "[{asctime}][{filename}] - {levelname}: {message}",
+    # "[{asctime}][{filename}] - {levelname}: {message}",
+    "[{asctime}][{toga_module}] - {levelname}: {message}",
     style="{",
     datefmt="%Y-%m-%d %H:%M:%S",
 )
@@ -290,9 +291,14 @@ class TogaDirConfig:
 
 
 ## Executables
+def timestamp() -> str:
+    """Returns the current date- and timestamp"""
+    return datetime.now().strftime("%H:%M_%d.%m.%y")
+
+
 def dir_name_by_date(prefix: str) -> str:
     """Returns current date and time preceded by a given prefix"""
-    return f"{prefix}_{datetime.now().strftime('%H:%M_%d.%m.%y')}"
+    return f"{prefix}_{timestamp()}"
 
 
 def hex_code() -> str:
@@ -305,7 +311,8 @@ def hex_code() -> str:
 
 def hex_dir_name(prefix: str) -> str:
     """A combination of the two functions above"""
-    return f"{dir_name_by_date(prefix)}_{hex_code()}"
+    # return f"{dir_name_by_date(prefix)}_{hex_code()}"
+    return f"{prefix}_{hex_code()}"
 
 
 def die(message: str) -> int:
@@ -600,6 +607,23 @@ def parse_one_column(file: Union[str, TextIO]) -> List[str]:
             return list(map(lambda x: x.strip("\n\r\t"), h.readlines()))
 
 
+def read_tab(file: str) -> Iterable[str]:
+    """Read a TSV file line by line, yield a generator of field-split lines"""
+    if type(file) is str:
+        with open(file, "r") as h:
+            for line in h:
+                data: List[str] = line.strip().split("\t")
+                if not data or not data[0]:
+                    continue
+                yield data
+    else:
+        for line in file:
+            data: List[str] = line.strip().split("\t")
+            if not data or not data[0]:
+                continue
+            yield data
+
+
 def reverse_complement(seq: str) -> str:
     """Returns a reverse complement of a standard alphabet nucleotide sequence"""
     out_seq: str = "".join([COMPLEMENT[x] for x in seq[::-1]])
@@ -674,22 +698,29 @@ class Lock:
 
 
 class CommandLineManager:
-    __slots__ = ("v", "logger")
+    __slots__ = ("v", "debug", "logger")
     """
     A minimal functionality class to be decorated with Click functionality and
     further extended to suit particular scripts' needs
     """
 
-    def set_logging(self, name: str = __name__) -> None:
+    def set_logging(self, name: str = __name__, toga_module: str = None) -> None:
         """
         Sets up logging system for a TogaMain instance
         """
+        logging.root.handlers = []
         if name is None:
             name = __name__
+        if toga_module is None:
+            toga_module = "unknown_module"
         self.logger: logging.Logger = logging.getLogger(name)
         if self.logger.handlers:
+            self.logger = logging.LoggerAdapter(self.logger, {"toga_module": toga_module})
             return
-        self.logger.setLevel(logging.DEBUG)
+        if hasattr(self, "debug") and self.debug:
+            self.logger.setLevel(logging.DEBUG)
+        else:
+            self.logger.setLevel(logging.INFO)
         if hasattr(self, "log_file") and self.log_file:
             file_handler: logging.FileHandler = logging.FileHandler(
                 self.log_file, mode="a", encoding=UTF8
@@ -700,14 +731,35 @@ class CommandLineManager:
             console_handler: logging.StreamHandler = logging.StreamHandler()
             console_handler.setFormatter(FORMATTER)
             self.logger.addHandler(console_handler)
+        self.logger = logging.LoggerAdapter(self.logger, {"toga_module": toga_module})
 
-    def _to_log(self, msg: str, level: str = "info"):
-        """
-        Adds the message to the log
+    def _to_log(self, msg: str, level: Optional[str] = "info") -> None:
+        """Logs a message at a given level
+
+        Args:
+            msg: A message to report in the log channel/file
+            level: Logging level to report the message at
+
+        Raises:
+            Returns without logging anything if the current class has no 'logger' attribute
         """
         if not hasattr(self, "logger"):
             return
         getattr(self.logger, level)(msg)
+
+    def _debug(self, msg: str) -> None:
+        """Logs message at DEBUG level
+
+        Args:
+            msg: A message to report in the log channel/file
+
+        Raises:
+            Returns without logging anything if `debug` attribute does not exist 
+        or is set to False or if `logger` attribute does not exist
+        """
+        if not hasattr(self, "debug") or not self.debug:
+            return
+        self._to_log(msg=msg, level="debug")
 
     def _echo(self, msg: str) -> None:
         """Report a line to standard output if verbosity is enabled"""
@@ -800,11 +852,11 @@ class CommandLineManager:
             stdout=subprocess.PIPE if gather_stdout else None,
             stderr=subprocess.PIPE,
         )
-        if self.v and not shun_verbosity:
+        if self.v and not shun_verbosity and not gather_stdout:
             for line in pr.stdout:
                 if not line:
                     continue
-                # self._echo(line)
+                self._echo(line) ##what was this supposed to mean?
         stdout, stderr = pr.communicate(input=input_)
         rc: int = pr.returncode
         if rc != 0:
@@ -815,3 +867,7 @@ class CommandLineManager:
             self._die(msg)
         if gather_stdout:
             return stdout.decode("utf8")
+
+    def _symlink(self, from_: os.PathLike, to_: os.PathLike) -> None:
+        cmd: str = f"ln -s {from_} {to_}"
+        self._exec(cmd, "Symlink creation failed:")

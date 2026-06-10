@@ -54,6 +54,18 @@ ACC_MINUS: str = "spliceAiAcceptorMinus"
 PIPELINE_STEPS: Tuple[str] = ("all", "prepare", "schedule", "run", "aggregate")
 RESUME_ORDER: Dict[str, str] = {x: i for i, x in enumerate(PIPELINE_STEPS)}
 
+def batch_num(file: str, template: str) -> int:
+    """Returns the batch number from the batch file name
+
+    Args:
+        file: a name of the batch output file
+        template: SpliceAi file template to remove
+
+    Returns:
+        Batch number as integer
+    """
+    return file.split("@")[-1].replace(template, "").replace("batch", "").replace(".wig", "")
+
 
 class SpliceAiManager(CommandLineManager):
     """ """
@@ -116,12 +128,14 @@ class SpliceAiManager(CommandLineManager):
         twobittofa_binary: Optional[click.Path],
         fatotwobit_binary: Optional[click.Path],
         wigtobigwig_binary: Optional[click.Path],
-        project_name: Optional[str],
+        project_name: Optional[Union[str, None]],
         keep_temporary_files: Optional[bool],
         verbose: Optional[bool],
     ) -> None:
         self.v: bool = verbose
-        self.project_name: str = dir_name_by_date("spliceai")
+        self.project_name: str = (
+            project_name if project_name is not None else dir_name_by_date("spliceai")
+        )
         self.output: str = (
             self._abspath(output)
             if output is not None
@@ -482,33 +496,42 @@ class SpliceAiManager(CommandLineManager):
         self._to_log("Aggregating SpliceAI prediction results")
         for template in FILE_NAME_TEMPLATES:
             final_file: str = os.path.join(self.output, f"spliceAi{template}.bw")
-            # stub_path: str = os.path.join(self.tmp_dir, f"*{template}.wig")
             tmp_aggr_wig: str = os.path.join(self.tmp_dir, f"spliceAi{template}.wig")
-            # cmd: str = (
-            #     f"cat {stub_path} > {tmp_aggr_wig} && "
-            #     f"{self.wigtobigwig_binary} {tmp_aggr_wig} {self.chrom_sizes} {final_file}"
-            # )
-            # _ = self._exec(cmd, "File aggregation for %s failed:" % template)
             files_to_aggr: List[str] = [
                 x for x in os.listdir(self.tmp_dir) if template in x and "spliceAi" not in x
             ]
-            files_to_aggr.sort(
-                key=lambda x: int(x.replace(template, "").replace("batch", "").replace(".wig", ""))
-            )
-            # touch_cmd: str = f"cat /dev {tmp_aggr_wig}"
-            # _ = self._exec(touch_cmd, f"Creating an empty stub file {tmp_aggr_wig} failed")
-            with open(tmp_aggr_wig, "w"):
-                pass
-            for file in files_to_aggr:
-                filepath: str = os.path.join(self.tmp_dir, file)
-                if "batch0" in file:
-                    add_cmd: str = f"cat {filepath} > {tmp_aggr_wig}"
-                else:
-                    add_cmd: str = f"cat {filepath} >> {tmp_aggr_wig}"
+            # files_to_aggr.sort(
+            #     key=lambda x: int(x.replace(template, "").replace("batch", "").replace(".wig", ""))
+            # )
+            # with open(tmp_aggr_wig, "w"):
+            #     pass
+            # for file in files_to_aggr:
+            #     filepath: str = os.path.join(self.tmp_dir, file)
+            #     if "batch0" in file:
+            #         add_cmd: str = f"cat {filepath} > {tmp_aggr_wig}"
+            #     else:
+            #         add_cmd: str = f"cat {filepath} >> {tmp_aggr_wig}"
                 # add_cmd = f"grep -v fixedStep {filepath} >> {tmp_aggr_wig}"
-                _ = self._exec(add_cmd, f"Adding file {filepath} to the main Wiggle stub failed")
+                # _ = self._exec(add_cmd, f"Adding file {filepath} to the main Wiggle stub failed")
+                        ## sort the files by chromosome
+            chrom2output: Dict[str, List[str]] = defaultdict(list)
+            for file in files_to_aggr:
+                chrom_name: str = "@".join(file.split("@")[:-1])
+                chrom2output[chrom_name].append(file)
+            for chrom, chrom_files_to_aggr in chrom2output.items():
+                chrom_files_to_aggr.sort(key=lambda x: batch_num(x, template))
+                for file in chrom_files_to_aggr:
+                    filepath: str = os.path.join(self.tmp_dir, file)
+                    if not os.path.exists(tmp_aggr_wig) or os.stat(tmp_aggr_wig).st_size == 0:
+                        add_cmd: str = f"cat {filepath} > {tmp_aggr_wig}"
+                    else:
+                        add_cmd: str = f"cat {filepath} >> {tmp_aggr_wig}"
+                    _ = self._exec(add_cmd, f"Adding file {filepath} to the main Wiggle stub failed")
             convert_cmd: str = f"{self.wigtobigwig_binary} {tmp_aggr_wig} {self.chrom_sizes} {final_file}"
-            _ = self._exec(convert_cmd, "Wiggle to BigWig convertion failed")
+            _ = self._exec(
+                convert_cmd, 
+                "Wiggle to BigWig convertion failed for file %s" % tmp_aggr_wig,
+            )
 
     def _execute_step(self, step: str):
         """

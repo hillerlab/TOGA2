@@ -108,7 +108,7 @@ class TwoBitConverter(CommandLineManager):
         verbose: Optional[bool],
     ) -> None:
         self.v: bool = verbose
-        self.set_logging(log_name)
+        self.set_logging(name=log_name, toga_module="fasta2twobit")
         self.fa2twobit: Union[str, None] = None
         self.set_twobit_path(fa2twobit)
 
@@ -163,7 +163,7 @@ class TwoBitConverter(CommandLineManager):
                 h.write(out_header + "\n" + sequences + "\n")
         # print(aggr_results)
         # aggr_results = aggr_results.encode('utf8')
-        cmd = f"faToTwoBit {tmp_path} {output}"
+        cmd = f"{self.fa2twobit} {tmp_path} {output}"
         # print(cmd)
         _ = self._exec(cmd, ERR)
         self._rm(tmp_path)

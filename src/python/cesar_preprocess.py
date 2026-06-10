@@ -525,8 +525,10 @@ class CesarPreprocessor(CommandLineManager):
         verbose: Optional[bool],
     ) -> None:
         self.v: bool = verbose
-        self._echo("Initializing CESAR preprocessing module")
-        self._echo("Checking if output directory exists")
+        self.set_logging(name=f"{__name__}_{hex_code()}", toga_module="cesar_preprocess")
+
+        self._to_log("Initializing CESAR preprocessing module")
+        self._to_log("Checking if output directory exists")
         self.output: str = (
             output if output else dir_name_by_date("cesar_preprocessing_")
         )
@@ -534,7 +536,6 @@ class CesarPreprocessor(CommandLineManager):
             self._to_log("Creating output directory")
             self._mkdir(self.output)
         self.log_file: str = os.path.join(self.output, "log.txt")
-        self.set_logging(f"{__name__}_{hex_code()}")
         self.chains: Tuple[str] = tuple(chains.split(","))
         self._to_log(
             f"Input chain{' is' if len(self.chains) == 1 else 'a are'}: {chains}"
@@ -1239,7 +1240,7 @@ class CesarPreprocessor(CommandLineManager):
 
     def correct_projection_boundaries(
         self, proj: Tuple[int, int], tr: str, group: int
-    ) -> Tuple[int]:
+    ) -> Union[ProjectionCoverageData, None]:
         """
         Corrects search boundaries for a given projection
         """
@@ -2028,13 +2029,20 @@ class CesarPreprocessor(CommandLineManager):
                         for k, v in Counter(self.rejection_reasons[tr][proj]).items()
                     ]
                 )
-                report: str = RejectionReasons.PREPROCESSING_REJ.format(
-                    f"{tr}#{','.join(self.chains)}",
-                    proj,
-                    msg,
-                    ";".join(reason_col),
-                    status,
-                )
+                if reason_col:
+                    reason_col = ";".join(reason_col)
+                    report: str = RejectionReasons.PREPROCESSING_REJ.format(
+                        f"{tr}#{','.join(self.chains)}",
+                        proj,
+                        msg,
+                        reason_col,
+                        status,
+                    )
+                else:
+                    report: str = RejectionReasons.NO_ALIGNED_EXON_REJ.format(
+                        f"{tr}#{','.join(self.chains)}",
+                        status
+                    )
                 h.write(report + "\n")
 
     def spanning_chain_report(self) -> None:

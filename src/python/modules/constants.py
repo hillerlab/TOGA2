@@ -11,6 +11,9 @@ __credits__ = "Bogdan M. Kirilenko"
 class Constants:
     LOCATION = os.path.dirname(__file__)
 
+    CONFIG_FORMATS: Tuple[str] = ("json", "tsv", "yaml")
+    YAML: str = "yaml"
+
     BINARIES_TO_CHECK: Dict[str, str] = {
         "bigbedtobed_binary": "bigBedToBed",
         "bedtobigbed_binary": "bedToBigBed",
@@ -19,8 +22,11 @@ class Constants:
         "twobittofa_binary": "twoBitToFa",
         "ixixx_binary": "ixIxx",
         "prank_bin": "prank",
+        "tree_bin": "iqtree2",
         "mailx_binary": "mailx",
     }
+
+    RAXML_DEFAULT_NAME: str = "raxmlHPC-PTHREADS-AVX"
 
     SPLICEAI_FILES: Tuple[str, ...] = (
         "spliceAiDonorPlus.bw",
@@ -109,7 +115,7 @@ class Constants:
     DEFAULT_LOSS_SYMBOLS: Tuple[str, ...] = ("FI", "I", "PI", "UL")
 
     FORMATTER: Formatter = Formatter(
-        "[{asctime}][{filename}] - {levelname}: {message}",
+        "[{asctime}][{toga_module}] - {levelname}: {message}",
         style="{",
         datefmt="%Y-%m-%d %H:%M:%S",
     )
@@ -209,16 +215,18 @@ class Constants:
             "orthology_job_dir",
             "orthology_input_dir",
             "orthology_res_dir",
-            "resolved_leaves_file",
-            "orth_resolution_report",
-            "one2zero_genes",
+            # "resolved_leaves_file",
+            # "orth_resolution_report",
+            # "one2zero_genes",
             "aa_hdf5",
             "orth_resolution_raw",
         ),
         "summarize_trees": (
             "resolved_leaves_file",
+            "unresolved_clades_file",
             "orth_resolution_report",
             "one2zero_genes",
+            "rejected_at_tree_step",
         ),
         "finalize": (
             "query_annotation_final",
@@ -247,6 +255,7 @@ class Constants:
         "CHROM_UNALIGNED": "feature_extraction",
         "TRANSCRIPT_UNALIGNED": "feature_extraction",
         "NO_PROJ": "classification",
+        "PPGENE_ONLY": "classification",
         "INSUFFICIENT_CHAIN_SCORE": "classification",
         "CHAIN_LIMIT_EXCEEDED": "preprocessing",
         "EXCEEDS_MEMORY": "preprocessing",
@@ -348,13 +357,6 @@ nextflow.enable.dsl=2
 
 params.joblist = 'NONE'  // file containing jobs
 
-if (params.joblist == "NONE"){{
-    println("Usage: nextflow execute_joblist.nf  --joblist [joblist file] -c [config file]")
-    System.exit(2);
-}}
-
-lines = Channel.fromPath(params.joblist).splitText()
-
 process execute_jobs {{
 
     errorStrategy 'retry'
@@ -371,6 +373,11 @@ process execute_jobs {{
 }}
 
 workflow {{
+    if (params.joblist == "NONE") {{
+        println("Usage: nextflow execute_joblist.nf  --joblist [joblist file] -c [config file]")
+        System.exit(2)
+    }}
+    lines = Channel.fromPath(params.joblist).splitText()
     execute_jobs(lines)
 }}"""
 
@@ -531,6 +538,9 @@ class RejectionReasons:
     UNCLASS_REJ_REASON: str = "\t".join(
         ("TRANSCRIPT", "{}", "0", "No classifiable projections found", "NO_PROJ", "M")
     )
+    PPGENE_ONLY_REASON: str = "\t".join(
+        ("TRANSCRIPT", "{}", "0", "Only processed pseudogene projections found", "PPGENE_ONLY", "M")
+    )
     UNDERSCORED_REJ_REASON: str = "\t".join(
         (
             "PROJECTION",
@@ -652,7 +662,7 @@ class RejectionReasons:
     )
     ORTH_REJ_TEMPLATE: str = "\t".join(
         (
-            "TRANSCRIPT",
+            "PROJECTION",
             "{}",
             "0",
             "Rejected after the gene resolution step",
@@ -1057,6 +1067,7 @@ TOGA2_SLOTS: Tuple[str, ...] = (
     "disable_fragment_assembly",
     "orthologs_only",
     "one2ones_only",
+    "annotate_paralogs",
     "paralogs_over_spanning",
     "enable_spanning_chains",
     "annotate_ppgenes",
@@ -1124,12 +1135,16 @@ TOGA2_SLOTS: Tuple[str, ...] = (
     "max_number_of_retries",
     "nextflow_config_dir",
     "max_parallel_time",
+    "project_arg_format",
     "keep_nextflow_log",
     "output",
     "keep_tmp",
     "project_name",
     "project_id",
+    "timestamp",
+    "cmd",
     "v",
+    "debug",
     "email",
     "mailx_binary",
     "toga1",
@@ -1324,6 +1339,7 @@ TOGA2_SLOT2ARG: Dict[str, str] = {
     "disable_fragment_assembly": "disable_fragment_assembly",
     "orthologs_only": "orthologs_only",
     "one2ones_only": "one2ones_only",
+    "annotate_paralogs": "annotate_paralogs",
     "paralogs_over_spanning": "paralogs_over_spanning",
     "enable_spanning_chains": "enable_spanning_chains",
     "annotate_ppgenes": "annotate_processed_pseudogenes",
@@ -1393,8 +1409,10 @@ TOGA2_SLOT2ARG: Dict[str, str] = {
     "toga1_plus_cesar": "toga1_plus_corrected_cesar",
     "output": "output",
     "project_name": "project_name",
+    "project_arg_format": "project_arg_format",
     "keep_tmp": "keep_temporary_files",
     "v": "verbose",
+    "debug": "debug",
     "email": "email",
     "mailx_binary": "mailx_binary",
     "fatotwobit_binary": "fatotwobit_binary",

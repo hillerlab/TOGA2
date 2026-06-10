@@ -170,7 +170,7 @@ class FinalOrthologyResolver(CommandLineManager):
     ) -> None:
         self.v: bool = verbose
         self.log_file: click.Path = log_file
-        self.set_logging(log_name)
+        self.set_logging(name=log_name, toga_module="orthology_final")
 
         self.ref_gene2tr: Dict[str, List[str]] = defaultdict(
             list
@@ -189,7 +189,7 @@ class FinalOrthologyResolver(CommandLineManager):
         ] = []  ## genes rendered one2zero after gene tree reconciliation
         self.out_lines: List[str] = []
         self.one2zero_file: Union[click.File, None] = one2zero_file
-        self.rejected_items: List[str] = []
+        self.rejected_items: Set[str] = set()
         self.rejection_log: Union[click.File, None] = rejection_log
         self.rejected_list: Union[click.File, None] = rejected_list
         self.proj2loss: Dict[str, str] = {}
@@ -366,6 +366,17 @@ class FinalOrthologyResolver(CommandLineManager):
             del self.q2r[query_gene]
             self.removed_genes.add(ref_gene)
             self.removed_genes.add(query_gene)
+            for any_ref_tr in self.ref_gene2tr[ref_gene]:
+                for any_query_tr in self.tr2proj[any_ref_tr]:
+                    any_query_gene: str = self.query_tr2gene[any_query_tr]
+                    if any_query_gene != query_gene:
+                        self._to_log(
+                            (
+                                "Removing projection %s since the progenitor transcript %s "
+                                "was rendered 1:1 after the gene tree step"
+                            ) % (any_query_tr, any_ref_tr)
+                        )
+                        self.rejected_items.add(any_query_tr)
             for ref_tr, query_tr in transcripts:
                 ## CAVEAT: Query transcript used  for gene tree reconstruction
                 ## might have come from a gene other than the newly established ortholog;
@@ -377,6 +388,7 @@ class FinalOrthologyResolver(CommandLineManager):
                         "Transcript %s is missing from the reference gene-to-transcript mapping"
                         % progenitor_tr
                     )
+
                 progenitor_gene: str = self.ref_tr2gene[progenitor_tr]
                 if progenitor_gene != ref_gene:
                     self._to_log(
@@ -387,7 +399,12 @@ class FinalOrthologyResolver(CommandLineManager):
                         % (query_tr, query_gene, ref_gene),
                         "warning",
                     )
-                    self.rejected_items.append(query_tr) ## try!
+                    if query_tr in self.rejected_items:
+                        self._to_log(
+                            "Projection %s has been added to the rejection log at least twice" % query_tr,
+                            "warning"
+                        )
+                    self.rejected_items.add(query_tr) ## try!
                     recorded_lines: bool = False
                 else:
                     # out_line: str = '\t'.join(
@@ -396,7 +413,13 @@ class FinalOrthologyResolver(CommandLineManager):
                     # self.out_lines.append(out_line)
                     recorded_lines: bool = True
                     deprecated_projections: List[str] = [x for x in self.tr2proj[ref_tr] if x != query_tr]
-                    self.rejected_items.extend(deprecated_projections)
+                    if any(x in self.rejected_items for x in deprecated_projections):
+                        self._to_log(
+                            "The following projections have been added to the rejection log at least twice: %s"
+                            % ", ".join(deprecated_projections),
+                            "warning"
+                        )
+                    self.rejected_items.update(deprecated_projections)
                 for other_query_tr in self.query_gene2tr[query_gene]:
                     other_ref_tr: str = get_tr(other_query_tr)  #'#'.join(other_query_tr.split('#')[:-1])
                     if other_ref_tr not in self.ref_tr2gene:
@@ -407,7 +430,13 @@ class FinalOrthologyResolver(CommandLineManager):
                             f"Skipping {other_query_tr} since it does not "
                             "belong to the original reference gene"
                         )
-                        self.rejected_items.append(other_query_tr)
+                        if other_query_tr in self.rejected_items:
+                            self._to_log(
+                                "Projection %s has been added to the rejection log at least twice" 
+                                % other_query_tr,
+                                "warning"
+                            )
+                        self.rejected_items.add(other_query_tr)
                         continue
                     out_line: str = "\t".join(
                         (ref_gene, other_ref_tr, query_gene, other_query_tr, ONE2ONE)
@@ -517,7 +546,11 @@ class FinalOrthologyResolver(CommandLineManager):
                     "Projection %s rendered orphan after the gene tree step" % orphan_tr,
                     "warning",
                 )
-                self.rejected_items.append(orphan_tr)
+                # self._to_log(
+                #     "Projection %s has been added to the rejection log at least twice" % orphan_tr,
+                #     "warning"
+                # )
+                self.rejected_items.add(orphan_tr)
 
     def write_output(self) -> None:
         """

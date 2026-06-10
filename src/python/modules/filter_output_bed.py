@@ -111,7 +111,7 @@ class OutputBedFilter(CommandLineManager):
         verbose: Optional[bool],
     ) -> None:
         self.v: bool = verbose
-        self.set_logging()
+        self.set_logging(name=log_name, toga_module="query_fasta_filter")
 
         self.discarded_projs: Set[str] = parse_single_column(deprecated_projection_list)
         self.discarded_bed_lines: List[str] = []

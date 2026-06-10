@@ -23,7 +23,7 @@ __credits__ = "Bogdan M. Kirilenko"
 __all__ = None
 
 ALLOWED_CHARSET: Tuple[int, ...] = tuple(
-    [35, 45, 46, *range(48, 58), *range(65, 91), 95, *range(97, 123), 124]
+    [35, 45, 46, *range(48, 59), *range(65, 91), 95, *range(97, 123), 124]
 )
 
 
@@ -124,7 +124,7 @@ class AnnotationFilter(CommandLineManager):
         verbose: Optional[bool],
     ) -> None:
         self.v: bool = verbose
-        self.set_logging(log_name)
+        self.set_logging(name=log_name, toga_module="ref_bed_filter")
 
         self.ref_bed: click.File = ref_bed
         self.output: click.File = output

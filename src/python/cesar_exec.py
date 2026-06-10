@@ -570,7 +570,7 @@ class CesarExecutor(CommandLineManager):
             self._echo("Creating output directory")
             self._mkdir(self.output)
         self.log_file: str = os.path.join(self.output, "log.txt")
-        self.set_logging(f"{__name__}_{hex_code()}")
+        self.set_logging(name=f"{__name__}_{hex_code()}", toga_module="cesar_exec")
 
         self._to_log("Initializing the CESAR wrapper")
         self.transcript: str = transcript
@@ -870,13 +870,10 @@ class CesarExecutor(CommandLineManager):
                 if group.contains_last_exon and not self.toga1:
                     cesar_cmd += " -l"
 
-                self._to_log(f"{cesar_input=}")
                 ## run CESAR
                 self._to_log(
                     f"Aligning exon group {g} for projection {self.projection_name}"
                 )
-                import subprocess
-                subprocess.run(cesar_cmd, shell=True)
                 cesar_out: str = self._exec(cesar_cmd, self.cesar_err, cesar_input)
 
                 ## parse the CESAR results and store the CesarExonEntry objects

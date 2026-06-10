@@ -12,28 +12,26 @@ Detailed explanations of all output files can be found in our
 [TOGA2 Wiki](https://github.com/hillerlab/TOGA2/wiki).
 
 ## Changelog
-### v2.0.7b
+### v2.0.8
 * `run` mode:
-    * Replacing positional arguments with keyword arguments
-    * `--isoform_file`, `--u12_file`, and `--spliceai_dir` options are now "semi-mandatory"; the user is expected to provide the respective arguments unless the explicit deprecative flags are set
-    * Alternative input formatting with `--input_directory`, `--ref_name`, and `--query_name` shortcuts: Format your data storage tree once and enjoy simplified command line interface
     * All eight CESAR2 profiles can be now provided as a single input directory with the `--cesar_profile_dir` argument.
-    * Postoga summary table (`toga.table.gz`) added to the output for `run` mode
-    * Projections of the same reference gene/transcript overlapping by absolute coding sequence coordinates are now collapsed into a single query gene regardless of their overlap by coding exon coordinates
     * `--paralogs_over_spanning` flag for swapping annotation priority
+    * revised naming notation for one-to-many genes: addoitional copies for genes with more than 26 instances in the query get the binary letter suffix ('_aa', '_ab', etc.); genes with more than 300 orthologous copies lead to a hardcoded crash.
+    * `--debug` mode (early access) for increased logging verbosity
+    * Variable project argument formats (TSV, JSON, YAML).
+* **NEW MODE**: `summary` for concise run summary generation.
+* `from-config` mode:
+    * Support for all accepted config formats (TSV, JSON, YAML).
+* `spliceai` mode:
+    * Lifting the "early access" warning (see `Minor changes`)
 * `integrate` mode:
-    * Paralogs overlapping orthologous projections are now retained as long as they contain enough novel sequence compared to the rest of the projections in the locus
-* **NEW MODE**: `postoga` for [Postoga](https://github.com/alejandrogzi/postoga) integration
-* **NEW MODE**: `sequence-alignment` for orthologous sequence alignment across multiple same-referenced TOGA2 runs (alpha version)
-* Apptainer support (see `supply/containers`):
-    * Stable local execution container image
-    * Batch manager-compatible image template
-    * Removing `toga2.py` as a container entry point
-    * Adding container support for parallel step scripts (see `supply/containers/README.md`)
-* Updated local installation
-    * Postoga installation
-    * Conda environment support
-    * Updated `bigWigToWig` version (`-bed` and `-header` options) now distributed with TOGA2
+    * Paralogs overlapping orthologous projections are now retained as long as they contain enough novel sequence compared to the rest of the projections in the locus.
+    * UTR-annotated input support
+* `prepare-input` mode:
+    * Exon sequence .2bit file for SLEASY compatibility generated along with BED and isoforms files.
+    * File names are now prepended with an optional reference name prefix.
+
+For the full list of code changes, see [changelog.md](https://github.com/hillerlab/TOGA2/blob/main/changelog.md) .
 
 ## Installation
 
@@ -55,6 +53,8 @@ python3 -m venv toga2
 source toga2/bin/activate
 make
 ```
+
+### from Github + Conda
 As an alternative to Python virtual environment, you can also use Conda for environment creation. TOGA2 comes with a Conda configuration file which creates an environment with Python, Cargo, and Nextflow:
 ```bash
 git clone --recurse-submodules https://github.com/hillerlab/TOGA2

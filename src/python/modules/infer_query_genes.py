@@ -13,8 +13,9 @@ the projections
 # sys.path.extend([LOCATION, PARENT])
 
 from collections import defaultdict
+from contextlib import nullcontext
 from dataclasses import dataclass
-from typing import Dict, List, Optional, Set, TextIO, Tuple, Union
+from typing import Dict, ContextManager, List, Optional, Set, TextIO, Tuple, Union
 
 import click
 import networkx as nx
@@ -50,6 +51,7 @@ EXTENDED_HIGH_CONFIDENCE: Tuple[str, str] = (
     "I",
 )  ## NOTE: Previously ('FI', 'PI') => likely a bug
 MIN_RELIABLE_EXON_COV: float = 0.6
+
 
 def parse_single_column(file: Union[TextIO, None]) -> Set[str]:
     """Parses a file as a newline-separated list of strings"""
@@ -250,10 +252,11 @@ class Coords:
 @click.option(
     "--rejection_log",
     "-rl",
-    type=click.File("a", lazy=True),
+    # type=click.File("a", lazy=True),
+    type=click.Path(exists=True),
     default=None,
     show_default=True,
-    help=("A path to to write the discarded entries to"),
+    help=("A path for the discarded entries to be read from/written to"),
 )
 @click.option(
     "--log_file",
@@ -282,6 +285,15 @@ class Coords:
     show_default=True,
     help="Controls execution verbosity",
 )
+@click.option(
+    "--debug",
+    is_flag=True,
+    default=False,
+    show_default=True,
+    help=""""Increases execution verbosity for debugging purpose; 
+automatically set the --verbose flag on"""
+)
+
 class QueryGeneCollapser(CommandLineManager):
     __slots__ = [
         "query_transcripts",
@@ -310,6 +322,7 @@ class QueryGeneCollapser(CommandLineManager):
         "discarded_extensions_file",
         "discarded_overextensions",
         "rejected_items_file",
+        "debug",
     ]
 
     """
@@ -341,11 +354,13 @@ class QueryGeneCollapser(CommandLineManager):
         rejection_log: Optional[Union[click.File, None]],
         log_file: Optional[Union[click.Path, None]],
         log_name: Optional[str],
-        verbose: bool,
+        verbose: Optional[bool],
+        debug: Optional[bool]
     ) -> None:
         self.v: bool = verbose
+        self.debug: bool = debug
         self.log_file: str = log_file
-        self.set_logging(log_name)
+        self.set_logging(name=log_name, toga_module="gene_inference")
 
         self._to_log("Initialising QueryGeneCollapser")
         if (feature_file is None) != (orthology_probabilities is None):
@@ -381,19 +396,25 @@ class QueryGeneCollapser(CommandLineManager):
                 "--ref_isoform_file and --ref_bed options do not work separately; "
                 "please provide both files if you want the script to consider reference nested genes"
             )
+
         self.proj2exon_cov: Dict[str, float] = {}
         if feature_file:
             self._to_log(
                 "Extracting chain exon coverage from the projection feature file"
             )
             self.parse_feature_file(feature_file)
+
+        self.rejected_items_file: click.Path = rejection_log
+        self.lost_projections: Set[str] = set()
+        self.extract_rejected_items()
+
         self.proj2prob: Dict[str, float] = {}
         self.tr2max_prob: Dict[str, float] = {}
         self.paralog_list: Set[str] = parse_single_column(paralog_list)
         self.proc_pseudogene_list: Set[str] = parse_single_column(
             processed_pseudogene_list
         )
-        self.lost_projections: Set[str] = set()
+
         self.proj2status: Dict[str, str] = {}
         # self.parse_loss_file(loss_summary_file)
         self.parse_transcript_meta(transcript_meta)
@@ -404,9 +425,11 @@ class QueryGeneCollapser(CommandLineManager):
         self.discarded_ppgenes: Set[str] = set()
         self.discarded_ppgenes_file: str = redundant_processed_pseudogenes
         self.discarded_extensions_file: click.File = insufficiently_covered_orthologs
-        self.rejected_items_file: click.File = rejection_log
 
         self.run()
+
+    # def set_logging(self, name: str) -> None:
+    #     super().set_logging(name=name, toga_module="gene_inference")
 
     def run(self) -> None:
         """
@@ -449,12 +472,38 @@ class QueryGeneCollapser(CommandLineManager):
         # for chrom in self.query_transcripts:
         #     self.query_transcripts[chrom].sort(key=lambda x: x.start)
 
-    def parse_exon_meta(self, file: TextIO) -> None:
+    def extract_rejected_items(self) -> None:
+        """Extracts rejected projections from the rejection file, 
+        recording them as lost projections ignored in the second-best filter
+
+        Args:
+            None
+
+        Returns:
+            None
         """
-        Parses query meta. The following data are further used for gene inference:
+        if self.rejected_items_file is None:
+            return
+        with open(self.rejected_items_file, "r") as h:
+            for line in h:
+                data: List[str] = line.strip().split("\t")
+                if not data or not data[0]:
+                    return
+                if data[0] != PROJECTION:
+                    continue
+                self.lost_projections.add(data[1])
+
+    def parse_exon_meta(self, file: TextIO) -> None:
+        """Parses query meta. The following data are further used for gene inference:
         * exon coordinates;
         * exon loss status;
         * exon presence in the initial chains
+
+        Args:
+            file: a TextIO handle to the opened file
+
+        Returns:
+            None
         """
         annotated_projections: Set[str] = set()
         for line in file:
@@ -643,7 +692,7 @@ class QueryGeneCollapser(CommandLineManager):
         """
         chrom2tr_coords: Dict[str, List[Tuple[str, int, int]]] = defaultdict(list)
         for line in ref_isoform_file:
-            data: List[str] = line.rstrip().split()
+            data: List[str] = line.rstrip().split("\t")
             if not data or not data[0]:
                 continue
             gene, tr = data
@@ -662,7 +711,7 @@ class QueryGeneCollapser(CommandLineManager):
             cds_end: int = int(data[7])
             name: str = data[3]
             if name not in self.ref_isoform2gene:
-                self._to_log(
+                self._die(
                     "Isoform %s is absent from the reference isoform file" % name
                 )
             chrom2tr_coords[chrom].append((name, cds_start, cds_end))
@@ -672,7 +721,7 @@ class QueryGeneCollapser(CommandLineManager):
                 gene1: str = self.ref_isoform2gene.get(tr1[0], "")
                 if not gene1:
                     continue
-                for tr2 in trs[i:]:
+                for tr2 in trs[i+1:]:
                     if tr2[1] >= tr1[2]:
                         break
                     gene2: str = self.ref_isoform2gene.get(tr2[0], "")
@@ -795,7 +844,7 @@ class QueryGeneCollapser(CommandLineManager):
                         if gene_in in self.intersecting_ref_genes.get(
                             gene_out, []
                         ) or gene_out in self.intersecting_ref_genes.get(gene_in, []):
-                            self._to_log(
+                            self._debug(
                                 (
                                     "Projections %s and %s will not be merged "
                                     "since genes %s and %s overlap in the reference"
@@ -807,10 +856,10 @@ class QueryGeneCollapser(CommandLineManager):
                     # if sufficient_exon_cov_out != sufficient_exon_cov_in and gene_out != gene_in:
                     #     continue
                     ## to ensure that projections from the same transcript/gene
-                    ## are grouped regardless of their overlap by coding bases 
-                    ## if they overlap by absolute CDS coordinates, 
+                    ## are grouped regardless of their overlap by coding bases
+                    ## if they overlap by absolute CDS coordinates,
                     ## set has_intersection to equality of ref progenitor genes
-                    has_intersection: bool = gene_in == gene_out#False
+                    has_intersection: bool = gene_in == gene_out  # False
                     # for exon1 in proj_out.exons.values():
                     #     e_start1, e_stop1 = exon1.start, exon1.stop
                     for exon1 in sorted(
@@ -891,9 +940,7 @@ class QueryGeneCollapser(CommandLineManager):
         for i, c in enumerate(raw_components, start=1):
             # c = [x for x in c if x not in self.discarded_paralogs]
             c = c.copy()
-            c.remove_nodes_from(
-                [x for x in c.nodes() if x in self.discarded_paralogs]
-            )
+            c.remove_nodes_from([x for x in c.nodes() if x in self.discarded_paralogs])
             if not c:
                 self._die(
                     "Projection clique %i consists entirely of redundant entities" % i
@@ -934,12 +981,14 @@ class QueryGeneCollapser(CommandLineManager):
                             if insuff_gene not in tr2proj:
                                 continue
                             insuff_exons: Set[Tuple[...]] = {
-                                (y.chrom, y.start, y.end) for y in self.tr2exons[insuff].values()
+                                (y.chrom, y.start, y.end)
+                                for y in self.tr2exons[insuff].values()
                             }
                             ## check if insufficiently covered isoforms introduce any novelty
                             for suff_name in tr2proj[insuff_gene]:
                                 suff_exons: Set[Tuple[...]] = {
-                                    (y.chrom, y.start, y.end) for y in self.tr2exons[suff_name].values()
+                                    (y.chrom, y.start, y.end)
+                                    for y in self.tr2exons[suff_name].values()
                                 }
                                 found_insuff: Set[str] = set()
                                 for exon in insuff_exons:
@@ -949,10 +998,13 @@ class QueryGeneCollapser(CommandLineManager):
                             if insuff_exons:
                                 second_best_alternative_isos.append(insuff)
                         if second_best_alternative_isos:
-                            ## on rare occasions, those alternative isoforms might lead 
+                            ## on rare occasions, those alternative isoforms might lead
                             ## to spurious many2one components
                             original_gene_num: int = len(
-                                {self.ref_isoform2gene[get_proj2trans(x)[0]] for x in c.nodes}
+                                {
+                                    self.ref_isoform2gene[get_proj2trans(x)[0]]
+                                    for x in c.nodes
+                                }
                             )
                             if original_gene_num > 1:
                                 gene2alt_form: Dict[str, List[int]] = defaultdict(list)
@@ -965,20 +1017,27 @@ class QueryGeneCollapser(CommandLineManager):
                                     disjointed: nx.Graph = c.copy()
                                     disjointed.remove_nodes_from(alt_projs)
                                     if NX_VERSION < 2.4:
-                                        disjointed_components = list(nx.connected_component_subgraphs(disjointed))
+                                        disjointed_components = list(
+                                            nx.connected_component_subgraphs(disjointed)
+                                        )
                                     else:
                                         disjointed_components = [
-                                            graph.subgraph(c) for c in nx.connected_components(disjointed)
+                                            graph.subgraph(c)
+                                            for c in nx.connected_components(disjointed)
                                         ]
                                     ## if the overall number of components did not change,
                                     ## the alternative isoforms are let in
                                     if len(disjointed_components) == 1:
                                         sufficiently_covered.extend(alt_projs)
                             else:
-                                ## already one2one+; the alternative isoforms are 
-                                sufficiently_covered.extend(second_best_alternative_isos)
+                                ## already one2one+; the alternative isoforms are
+                                sufficiently_covered.extend(
+                                    second_best_alternative_isos
+                                )
                         insufficiently_covered = [
-                            x for x in insufficiently_covered if x not in sufficiently_covered
+                            x
+                            for x in insufficiently_covered
+                            if x not in sufficiently_covered
                         ]
                         self.discarded_overextensions.update(insufficiently_covered)
                         # c = sufficiently_covered
@@ -993,7 +1052,13 @@ class QueryGeneCollapser(CommandLineManager):
                             ]
                         c: List[List[str]] = []
                         for clean_component in clean_components:
-                            c.append([x for x in clean_component.nodes if x in sufficiently_covered])
+                            c.append(
+                                [
+                                    x
+                                    for x in clean_component.nodes
+                                    if x in sufficiently_covered
+                                ]
+                            )
                     ## otherwise, check how many genes were projected to this locus
                     else:
                         reliable_projs: List[str] = [
@@ -1093,30 +1158,41 @@ class QueryGeneCollapser(CommandLineManager):
                 strand = "+" if strand else "-"
                 out_str: str = f"{chrom}\t{start}\t{stop}\t{name}\t0\t{strand}"
                 self.bed6_output.write(out_str + "\n")
+        self._debug("Number of query genes inferred: %i" % i)
 
     def write_discarded_items(self) -> None:
         """Save discarded items to respective files"""
-        for rej_orth in self.discarded_overextensions:
-            if self.discarded_extensions_file is not None:
-                self.discarded_extensions_file.write(rej_orth + "\n")
-            if self.rejected_items_file is not None:
-                status: str = self.proj2status[rej_orth]
-                orth_rej_line: str = RejectionReasons.REJ_ORTH_REASON.format(rej_orth, status)
-                self.rejected_items_file.write(orth_rej_line + "\n")
-        for rej_par in self.discarded_paralogs:
-            if self.discarded_paralogs_file is not None:
-                self.discarded_paralogs_file.write(rej_par + "\n")
-            if self.rejected_items_file is not None:
-                status: str = self.proj2status[rej_par]
-                par_rej_line: str = RejectionReasons.REJ_PARA_REASON.format(rej_par, status)
-                self.rejected_items_file.write(par_rej_line + "\n")
-        for rej_ppgene in self.discarded_ppgenes:
-            if self.discarded_ppgenes_file is not None:
-                self.discarded_ppgenes_file.write(rej_ppgene + "\n")
-            if self.rejected_items_file is not None:
-                status: str = self.proj2status[rej_ppgene]
-                ppgene_rej_line: str = RejectionReasons.REJ_PPGENE_REASON.format(rej_ppgene, status)
-                self.rejected_items_file.write(ppgene_rej_line + "\n")
+        with self._return_rej_log_handle() as h:
+            for rej_orth in self.discarded_overextensions:
+                if self.discarded_extensions_file is not None:
+                    self.discarded_extensions_file.write(rej_orth + "\n")
+                if self.rejected_items_file is not None:
+                    status: str = self.proj2status[rej_orth]
+                    orth_rej_line: str = RejectionReasons.REJ_ORTH_REASON.format(
+                        rej_orth, status
+                    )
+                    # self.rejected_items_file.write(orth_rej_line + "\n")
+                    h.write(orth_rej_line + "\n")
+            for rej_par in self.discarded_paralogs:
+                if self.discarded_paralogs_file is not None:
+                    self.discarded_paralogs_file.write(rej_par + "\n")
+                if self.rejected_items_file is not None:
+                    status: str = self.proj2status[rej_par]
+                    par_rej_line: str = RejectionReasons.REJ_PARA_REASON.format(
+                        rej_par, status
+                    )
+                    # self.rejected_items_file.write(par_rej_line + "\n")
+                    h.write(par_rej_line + "\n")
+            for rej_ppgene in self.discarded_ppgenes:
+                if self.discarded_ppgenes_file is not None:
+                    self.discarded_ppgenes_file.write(rej_ppgene + "\n")
+                if self.rejected_items_file is not None:
+                    status: str = self.proj2status[rej_ppgene]
+                    ppgene_rej_line: str = RejectionReasons.REJ_PPGENE_REASON.format(
+                        rej_ppgene, status
+                    )
+                    # self.rejected_items_file.write(ppgene_rej_line + "\n")
+                    h.write(ppgene_rej_line + "\n")
 
     def write_redundant_paralogs(self) -> None:
         """Write the names of redundant paralogous projections to a file"""
@@ -1131,6 +1207,22 @@ class QueryGeneCollapser(CommandLineManager):
             return
         for proj in self.discarded_overextensions:
             self.discarded_extensions_file.write(proj + "\n")
+
+    def _return_rej_log_handle(self) -> ContextManager:
+        """Returns context and handle to append the results
+        to the rejection log if any was provided
+
+        Args:
+            None
+
+        Returns:
+            A writeable context manager if rejection log file was provided,
+        contextlib.nullcontext object otherwise
+        """
+        if self.rejected_items_file is not None:
+            return open(self.rejected_items_file, "a")
+        else:
+            return nullcontext
 
 
 if __name__ == "__main__":

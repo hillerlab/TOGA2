@@ -317,7 +317,10 @@ def undefined_only(record: str) -> bool:
     contains only undefined symbols
     """
     seq: str = record.split("\n")[-1]
-    return all(x in ("X", "x", "*") for x in seq)
+    # return all(x in ("X", "x", "*") for x in seq)
+    all_symbols: int = len(seq)
+    undefined_symbols: int = sum(x in ("X", "x", "*") for x in seq)
+    return undefined_symbols >= all_symbols * 0.9
 
 
 def is_homopolymer(record: str) -> bool:
@@ -326,7 +329,7 @@ def is_homopolymer(record: str) -> bool:
     comprises of a single repetitive residue. A workaround for known PRANK behavior
     in the presence of homopolymer sequences
     """
-    seq: str = record.split("\n")
+    seq: str = record.split("\n")[-1]
     return len(set(seq)) < 2
 
 
@@ -687,7 +690,7 @@ class InitialOrthologyResolver(CommandLineManager):
         verbose: Optional[bool],
     ) -> None:
         self.v: bool = verbose
-        self.set_logging(log_name)
+        self.set_logging(name=log_name, toga_module="orthology_initial")
 
         self._to_log("Extracting reference transcripts names for orthology resolution")
         ref_bed_names: List[str] = extract_names_from_bed(ref_bed)
@@ -1172,11 +1175,11 @@ class InitialOrthologyResolver(CommandLineManager):
             for tr in non_projected_transcripts:
                 if tr in self.tr2proj and self.tr2proj[tr]:
                     status: str = max(
-                        [self.loss_status.get(x, "N") for x in self.tr2proj[tr]],
+                        [self.loss_status.get(x, "M") for x in self.tr2proj[tr]],
                         key=lambda x: CLASS_TO_NUM[x],
                     )
                 else:
-                    status: str = "N"
+                    status: str = "M"
                 line: str = RejectionReasons.REMOVED_ORTH_REASON.format(tr, status)
                 h.write(line + "\n")
             for r_gene, q_gene in self.removed_edges:
@@ -1411,7 +1414,7 @@ class InitialOrthologyResolver(CommandLineManager):
                 cmd: str = (
                     f"{executor} {table_path} {res_path} -t "
                     f"-pb {self.prank_bin} -rb {self.tree_bin} "
-                    f"-rc {self.tree_cpus} -rs {self.tree_bootnum}"
+                    f"-rc {self.tree_cpus} -rs {self.tree_bootnum} "
                 )
                 if self.container_image is not None:
                     if self.binding_map is not None:
@@ -1603,7 +1606,7 @@ class InitialOrthologyResolver(CommandLineManager):
                 cmd: str = (
                     f"{FINE_RESOLVER} {table_path} {res_path} -t "
                     f"-pb {self.prank_bin} -rb {self.tree_bin} "
-                    f"-rc {self.tree_cpus} -rs {self.tree_bootnum}"
+                    f"-rc {self.tree_cpus} -rs {self.tree_bootnum} "
                 )
                 if self.use_raxml:
                     cmd += " -raxml"

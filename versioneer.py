@@ -10,6 +10,22 @@ CHANGELOG: str = "changelog.md"
 README: str = "README.md"
 VERSION_FILE: str = "__version__.py"
 VERSION_TEMPLATE: str = "__version__ = \"{}\""
+CHANGELOG_LINK_LINE: str = (
+    "\nFor the full list of code changes, see "
+    "[changelog.md](https://github.com/hillerlab/TOGA2/blob/main/changelog.md) .\n"
+)
+
+def remove_version_suffix(version: str) -> str:
+    """
+    Removes the letter suffix from the version name
+
+    Args:
+        version: version identifier
+    
+    Returns:
+        Version identifier without letter suffices
+    """
+    return "".join((x for x in version if not x.isalpha()))
 
 @click.command()
 @click.argument("version", type=str, metavar="VERSION_NAME")
@@ -19,7 +35,7 @@ def versioneer(version: str) -> None:
     if not version[0].isdigit():
         raise ValueError("Version identifier must start with a digit")
     version = "v" + version
-    version_main: str = version.split("a")[0]
+    version_main: str = remove_version_suffix(version)
 
     ## update __version__.py
     with open(VERSION_FILE, "w") as h:
@@ -40,6 +56,7 @@ def versioneer(version: str) -> None:
     if not changelog_lines:
         click.echo("WARNING: No changelog update found")
         sys.exit(0)
+    changelog_lines += CHANGELOG_LINK_LINE
 
     ## replace the previous change description in README.md with a recent 
     anchor_found: bool = False
@@ -50,12 +67,20 @@ def versioneer(version: str) -> None:
                 anchor_found = True
                 continue
             if anchor_found:
-                if line.strip():
+                if line.startswith("## "):
+                    h.write("#" + changelog_lines + '\n')
+                    anchor_found = False
+                    h.write(line)
+                else:
                     continue
-                h.write("#" + changelog_lines + '\n')
-                anchor_found = False
             else:
                 h.write(line)
+            #     if not line.startswith("#"):
+            #         continue
+            #     h.write("#" + changelog_lines + '\n')
+            #     anchor_found = False
+            # else:
+            #     h.write(line)
 
 if __name__ == '__main__':
     versioneer()
