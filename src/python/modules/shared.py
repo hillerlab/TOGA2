@@ -808,7 +808,7 @@ class CommandLineManager:
         except FileNotFoundError:
             pass
         except Exception:
-            self._die("Unexpected behaviour observed while trying to remove %s" % f)
+            self._die("Unexpected behavior observed while trying to remove %s" % f)
 
     def _rmdir(self, d: str) -> None:
         """Recursive directory deletion method"""
