@@ -748,6 +748,10 @@ class CesarScheduler(CommandLineManager):
                 self.processed_pseudogene_list is not None
                 and proj in self.processed_pseudogene_list
             )
+            proj_is_paralog: bool = (
+                self.paralog_list is not None and 
+                proj in self.paralog_list
+            )
             if (
                 tr not in tr2chrom2graph.keys()
                 or chrom not in tr2chrom2graph[tr].keys()
@@ -763,11 +767,12 @@ class CesarScheduler(CommandLineManager):
                 for node in tr2chrom2graph[tr][chrom].nodes():
                     ## do not intersect orthologs/paralogs and retrocopy projections
                     if self.processed_pseudogene_list is not None:
-                        in_is_ppgene: bool = (
-                            self.processed_pseudogene_list is not None
-                            and node.name in self.processed_pseudogene_list
-                        )
+                        in_is_ppgene: bool = node.name in self.processed_pseudogene_list
                         if proj_is_ppgene != in_is_ppgene:
+                            continue
+                    if self.paralog_list is not None:
+                        in_is_paralog: bool = node.name in self.paralog_list
+                        if proj_is_paralog != in_is_paralog:
                             continue
                     ## if the current projection and a node in the subgraph intersect,
                     ## traverse an edge between them
