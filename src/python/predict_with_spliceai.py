@@ -164,10 +164,10 @@ class SpliceAiRunner(CommandLineManager):
 
         prefix: str = batch_prefix if batch_prefix is not None else hex_code()
 
-        self.acc_plus_file: str = os.path.join(output, f"{prefix}AcceptorPlus.wig")
-        self.do_plus_file: str = os.path.join(output, f"{prefix}DonorPlus.wig")
-        self.acc_minus_file: str = os.path.join(output, f"{prefix}AcceptorMinus.wig")
-        self.do_minus_file: str = os.path.join(output, f"{prefix}DonorMinus.wig")
+        self.acc_plus_file: str = os.path.join(output, f"{{}}@{prefix}AcceptorPlus.wig")
+        self.do_plus_file: str = os.path.join(output, f"{{}}@{prefix}DonorPlus.wig")
+        self.acc_minus_file: str = os.path.join(output, f"{{}}@{prefix}AcceptorMinus.wig")
+        self.do_minus_file: str = os.path.join(output, f"{{}}@{prefix}DonorMinus.wig")
 
         self.twobittofa_binary: Union[str, None] = twobittofa_binary
         self.wigtobigwig_binary: Union[str, None] = wigtobigwig_binary
@@ -231,6 +231,9 @@ class SpliceAiRunner(CommandLineManager):
         ## extract the sequences from the twobit file with the twoBitToFa command
         cmd: str = f"{self.twobittofa_binary} -bed={self.bed_file} {self.twobit} stdout"
         output: Union[str, None] = self._exec(cmd, "twoBitToFa call failed:")
+        if output is None:
+            self._die("Empty output from the twoBitToFa command %s" % cmd)
+        output += ">"
 
         ## lazy imports start here
         import numpy as np
@@ -251,216 +254,250 @@ class SpliceAiRunner(CommandLineManager):
         ## then write the results to output files
         header: str = ""
         seq: str = ""
-        with (
-            open(self.acc_plus_file, "w") as aph,
-            open(self.do_plus_file, "w") as dph,
-            open(self.acc_minus_file, "w") as amh,
-            open(self.do_minus_file, "w") as dmh,
-        ):
-            for line in output.split("\n"):
-                line = line.strip()
-                if line.startswith(FASTA_HEADER_START):
-                    ## next header reached; run SpliceAI for the sequence
-                    if header and seq:
-                        ## get the sequence coordinates in the original genome
-                        if header[-1] not in STRANDS:
-                            self._die(
-                                "Sequence %s does not have indication of its strand in the Fasta header"
-                                % header
-                            )
-                        seq = seq.upper()
-                        strand: bool = header[-1] == "+"
-                        chrom, start, end = self.chunk2coords[header]
-                        start_offset, end_offset = self.chunk2offsets[header]
-                        x = one_hot_encode(
-                            "N" * (context // 2) + seq + "N" * (context // 2)
-                        )[None, :]
-                        y = np.mean([models[m].predict(x) for m in range(5)], axis=0)
-
-                        ## get probabilities for acceptor and donor sites
-                        acceptor_prob: np.ndarray = y[0, :, 1]
-                        donor_prob: np.ndarray = y[0, :, 2]
-                        start_index: int = start_offset
-                        end_index: int = len(seq) - end_offset
-                        ## write the headers to the Wiggle files
-                        wiggle_header: str = WIGGLE_HEADER_TEMPLATE.format(
-                            chrom, start + 1
+        # with (
+        #     open(self.acc_plus_file, "w") as aph,
+        #     open(self.do_plus_file, "w") as dph,
+        #     open(self.acc_minus_file, "w") as amh,
+        #     open(self.do_minus_file, "w") as dmh,
+        # ):
+        for line in output.split("\n"):
+            line = line.strip()
+            if line.startswith(FASTA_HEADER_START):
+                ## next header reached; run SpliceAI for the sequence
+                if header and seq:
+                    ## get the sequence coordinates in the original genome
+                    if header[-1] not in STRANDS:
+                        self._die(
+                            "Sequence %s does not have indication of its strand in the Fasta header"
+                            % header
                         )
-                        if strand:
-                            aph.write(wiggle_header)
-                            dph.write(wiggle_header)
-                        else:
-                            amh.write(wiggle_header)
-                            dmh.write(wiggle_header)
-                        # print(f"Before the truncation: {len(acceptor_prob)=}, {len(donor_prob)=}")
-                        start_index: int = start_offset
-                        end_index: int = len(seq) - end_offset
-                        if strand:
-                            # start_index: int = start_offset
-                            # end_index: int = len(seq) - end_offset
-                            if start_index == 0:
-                                donor_prob = donor_prob[start_index:end_index - 1]
-                                # print(f"First chunk; positive donor prob before the value insertion, length={len(donor_prob)}")
-                                donor_prob = np.insert(donor_prob, 0, 0.0)
-                                # print(f"First chunk; positive donor prob after the value insertion, length={len(donor_prob)}")
-                            else:
-                                # donor_prob = donor_prob[start_index:end_index]
-                                donor_prob = donor_prob[start_index-1:end_index-1]
-                                # print(f"Middle chunk; positive donor prob, length={len(donor_prob)}")
-                            if end_offset == 0:
-                                acceptor_prob = acceptor_prob[start_index+1:end_index]
-                                # print(f"Last chunk; positive acceptor prob before the value insertion, length={len(acceptor_prob)}")
-                                acceptor_prob = np.insert(acceptor_prob, len(acceptor_prob) - 1, 0.0)
-                                # print(f"Last chunk; positive acceptor prob after the value insertion, length={len(acceptor_prob)}")
-                            else:
-                                acceptor_prob = acceptor_prob[start_index+1:end_index+1]
-                                # print(f"Middle chunk; positive acceptor prob, length={len(acceptor_prob)}")
-                        else: ## TO BE FIXED
-                            # start_index: int = end_offset
-                            # end_index: int = len(seq) - start_offset
-                            if start_index == 0:
-                                acceptor_prob = acceptor_prob[::-1][start_index:end_index-1]
-                                # print(f"First chunk; Negative acceptor prob before inserting the value, length={len(acceptor_prob)}")
-                                acceptor_prob = np.insert(acceptor_prob, 0, 0.0)
-                                # print(f"First chunk;Negative acceptor prob after inserting the value, length={len(acceptor_prob)}")
-                            else:
-                                # acceptor_prob = acceptor_prob[::-1][start_index:end_index]
-                                acceptor_prob = acceptor_prob[::-1][start_index-1:end_index-1]
-                                # print(f"Middle chunk; negative acceptor prob, length={len(acceptor_prob)}")
-                            if end_offset == 0:
-                                donor_prob = donor_prob[::-1][start_index+1:end_index+1]
-                                # print(f"Last chunk; negative donor prob before the value insertion, length={len(donor_prob)}")
-                                donor_prob = np.insert(donor_prob, len(donor_prob) - 1, 0.0)
-                                # print(f"Last chunk; negative donor prob after the value insertion, length={len(donor_prob)}")
-                            else:
-                                donor_prob = donor_prob[::-1][start_index+1:end_index+1]
-                                # donor_prob = donor_prob[::-1][start_index:end_index]
-                                # print(f"Middle chunk; negative donor prob, length={len(donor_prob)}")
-                        # print(f"{strand=}, {start_offset=}, {end_offset=}, {start_index=}, {end_index=}, {len(seq)=}, {len(acceptor_prob)=}, {len(donor_prob)=}, {x.shape=}, {y.shape=}")
+                    seq = seq.upper()
+                    strand: bool = header[-1] == "+"
+                    chrom, start, end = self.chunk2coords[header]
+                    start_offset, end_offset = self.chunk2offsets[header]
+                    x = one_hot_encode(
+                        "N" * (context // 2) + seq + "N" * (context // 2)
+                    )[None, :]
+                    y = np.mean([models[m].predict(x) for m in range(5)], axis=0)
 
-                        ## process and write the resulting values
-                        for i, x in enumerate(donor_prob):
-                            x = round(x, self.round_to) if x >= self.min_prob else 0.0
-                            if strand:
-                                dph.write(str(x) + "\n")
-                            else:
-                                dmh.write(str(x) + "\n")
-                        for i, x in enumerate(acceptor_prob):
-                            x = round(x, self.round_to) if x >= self.min_prob else 0.0
-                            if strand:
-                                aph.write(str(x) + "\n")
-                            else:
-                                amh.write(str(x) + "\n")
-
-                    ## start recording the new Fasta entry
-                    seq = ""
-                    header = line[1:]
-                    continue
-                if not line:
-                    continue
-                seq += line
-            ## run SpliceAI for the last element
-            ## TODO: I don't like how repetitive code looks now, but moving SpliceAI
-            ## to a separate method might create too much overhead with hefty imports
-            if header and seq:
-                if header[-1] not in STRANDS:
-                    self._die(
-                        "Sequence %s does not have indication of its strand in the Fasta header"
-                        % header
+                    ## get probabilities for acceptor and donor sites
+                    acceptor_prob: np.ndarray = y[0, :, 1]
+                    donor_prob: np.ndarray = y[0, :, 2]
+                    start_index: int = start_offset
+                    end_index: int = len(seq) - end_offset
+                    ## write the headers to the Wiggle files
+                    wiggle_header: str = WIGGLE_HEADER_TEMPLATE.format(
+                        chrom, start + 1
                     )
-                strand: bool = header[-1] == "+"
-                chrom, start, end = self.chunk2coords[header]
-                start_offset, end_offset = self.chunk2offsets[header]
-                x = one_hot_encode("N" * (context // 2) + seq + "N" * (context // 2))[
-                    None, :
-                ]
-                y = np.mean([models[m].predict(x) for m in range(5)], axis=0)
-                ## get probabilities for acceptor and donor sites
-                # positional probabilities
-                acceptor_prob: np.ndarray = y[0, :, 1]
-                donor_prob: np.ndarray = y[0, :, 2]
-                ## write the headers to the Wiggle files
-                wiggle_header: str = WIGGLE_HEADER_TEMPLATE.format(chrom, start + 1)
-                if strand:
-                    aph.write(wiggle_header)
-                    dph.write(wiggle_header)
-                else:
-                    amh.write(wiggle_header)
-                    dmh.write(wiggle_header)
-                ## process the results
-                ## positive strand annotation is more straightforward
-                # if strand:
-                #     start_index: int = start_offset
-                #     end_index: int = len(seq) - end_offset
-                #     acceptor_prob = acceptor_prob[start_index:end_index]
-                #     donor_prob = donor_prob[start_index:end_index]
-                # # negative strand requires some additional tweaks
-                # else:
-                #     start_index: int = end_offset
-                #     end_index: int = len(seq) - start_offset
-                #     acceptor_prob = acceptor_prob[start_index:end_index][::-1]
-                #     donor_prob = donor_prob[start_index:end_index][::-1]
-                start_index: int = start_offset
-                end_index: int = len(seq) - end_offset
-                if strand:
-                    # start_index: int = start_offset
-                    # end_index: int = len(seq) - end_offset
-                    if start_index == 0:
-                        donor_prob = donor_prob[start_index:end_index-1]
-                        # print(f"First chunk; positive donor prob before the value insertion, length={len(donor_prob)}")
-                        donor_prob = np.insert(donor_prob, 0, 0.0)
-                        # print(f"First chunk; positive donor prob after the value insertion, length={len(donor_prob)}")
-                    else:
-                        # donor_prob = donor_prob[start_index:end_index]
-                        donor_prob = donor_prob[start_index-1:end_index-1]
-                        # print(f"Middle chunk; positive donor prob, length={len(donor_prob)}")
-                    if end_offset == 0:
-                        acceptor_prob = acceptor_prob[start_index+1:end_index]
-                        # print(f"Last chunk; positive acceptor prob before the value insertion, length={len(acceptor_prob)}")
-                        acceptor_prob = np.insert(acceptor_prob, len(acceptor_prob) - 1, 0.0)
-                        # print(f"Last chunk; positive acceptor prob after the value insertion, length={len(acceptor_prob)}")
-                    else:
-                        acceptor_prob = acceptor_prob[start_index+1:end_index+1]
-                        # print(f"Middle chunk; positive acceptor prob, length={len(acceptor_prob)}")
-                else: ## TO BE FIXED
-                    # start_index: int = end_offset
-                    # end_index: int = len(seq) - start_offset
-                    if start_index == 0:
-                        acceptor_prob = acceptor_prob[::-1][start_index:end_index-1]
-                        # print(f"First chunk; Negative acceptor prob before inserting the value, length={len(acceptor_prob)}")
-                        acceptor_prob = np.insert(acceptor_prob, 0, 0.0)
-                        # print(f"First chunk; Negative acceptor prob after inserting the value, length={len(acceptor_prob)}")
-                    else:
-                        # acceptor_prob = acceptor_prob[::-1][start_index-1:end_index+1]
-                        # acceptor_prob = acceptor_prob[::-1][start_index:end_index]
-                        acceptor_prob = acceptor_prob[::-1][start_index-1:end_index-1]
-                        # print(f"Middle chunk; negative acceptor prob, length={len(acceptor_prob)}")
-                    if end_offset == 0:
-                        donor_prob = donor_prob[::-1][start_index+1:end_index+1]
-                        # print(f"Last chunk; negative donor prob before the value insertion, length={len(donor_prob)}")
-                        donor_prob = np.insert(donor_prob, len(donor_prob) - 1, 0.0)
-                        # print(f"Last chunk; negative donor prob after the value insertion, length={len(donor_prob)}")
-                    else:
-                        donor_prob = donor_prob[::-1][start_index+1:end_index+1]
-                        # donor_prob = donor_prob[::-1][start_index:end_index]
-                        # print(f"Middle chunk; negative donor prob, length={len(donor_prob)}")
-                # print(f"{strand=}, {start_offset=}, {end_offset=}, {start_index=}, {end_index=}, {len(seq)=}, {len(acceptor_prob)=}, {len(donor_prob)=}, {x.shape=}, {y.shape=}")
 
-                ## process and write the resulting values
-                for i, x in enumerate(donor_prob):
-                    x = round(x, self.round_to) if x >= self.min_prob else 0.0
+                    # if strand:
+                    #     aph.write(wiggle_header)
+                    #     dph.write(wiggle_header)
+                    # else:
+                    #     amh.write(wiggle_header)
+                    #     dmh.write(wiggle_header)
+                    # print(f"Before the truncation: {len(acceptor_prob)=}, {len(donor_prob)=}")
+                    start_index: int = start_offset
+                    end_index: int = len(seq) - end_offset
                     if strand:
-                        dph.write(str(x) + "\n")
-                    else:
-                        dmh.write(str(x) + "\n")
+                        # start_index: int = start_offset
+                        # end_index: int = len(seq) - end_offset
+                        if start_index == 0:
+                            donor_prob = donor_prob[start_index:end_index - 1]
+                            # print(f"First chunk; positive donor prob before the value insertion, length={len(donor_prob)}")
+                            donor_prob = np.insert(donor_prob, 0, 0.0)
+                            # print(f"First chunk; positive donor prob after the value insertion, length={len(donor_prob)}")
+                        else:
+                            # donor_prob = donor_prob[start_index:end_index]
+                            donor_prob = donor_prob[start_index-1:end_index-1]
+                            # print(f"Middle chunk; positive donor prob, length={len(donor_prob)}")
+                        if end_offset == 0:
+                            acceptor_prob = acceptor_prob[start_index+1:end_index]
+                            # print(f"Last chunk; positive acceptor prob before the value insertion, length={len(acceptor_prob)}")
+                            acceptor_prob = np.insert(acceptor_prob, len(acceptor_prob) - 1, 0.0)
+                            # print(f"Last chunk; positive acceptor prob after the value insertion, length={len(acceptor_prob)}")
+                        else:
+                            acceptor_prob = acceptor_prob[start_index+1:end_index+1]
+                            # print(f"Middle chunk; positive acceptor prob, length={len(acceptor_prob)}")
+                    else: ## TO BE FIXED
+                        # start_index: int = end_offset
+                        # end_index: int = len(seq) - start_offset
+                        if start_index == 0:
+                            acceptor_prob = acceptor_prob[::-1][start_index:end_index-1]
+                            # print(f"First chunk; Negative acceptor prob before inserting the value, length={len(acceptor_prob)}")
+                            acceptor_prob = np.insert(acceptor_prob, 0, 0.0)
+                            # print(f"First chunk;Negative acceptor prob after inserting the value, length={len(acceptor_prob)}")
+                        else:
+                            # acceptor_prob = acceptor_prob[::-1][start_index:end_index]
+                            acceptor_prob = acceptor_prob[::-1][start_index-1:end_index-1]
+                            # print(f"Middle chunk; negative acceptor prob, length={len(acceptor_prob)}")
+                        if end_offset == 0:
+                            donor_prob = donor_prob[::-1][start_index+1:end_index+1]
+                            # print(f"Last chunk; negative donor prob before the value insertion, length={len(donor_prob)}")
+                            donor_prob = np.insert(donor_prob, len(donor_prob) - 1, 0.0)
+                            # print(f"Last chunk; negative donor prob after the value insertion, length={len(donor_prob)}")
+                        else:
+                            donor_prob = donor_prob[::-1][start_index+1:end_index+1]
+                            # donor_prob = donor_prob[::-1][start_index:end_index]
+                            # print(f"Middle chunk; negative donor prob, length={len(donor_prob)}")
+                    # print(f"{strand=}, {start_offset=}, {end_offset=}, {start_index=}, {end_index=}, {len(seq)=}, {len(acceptor_prob)=}, {len(donor_prob)=}, {x.shape=}, {y.shape=}")
 
-                ## write the results to the Wiggle output file
-                for i, x in enumerate(acceptor_prob):
-                    x = round(x, self.round_to) if x >= self.min_prob else 0.0
+                    ## create the output files
                     if strand:
-                        aph.write(str(x) + "\n")
+                        acc_plus_file: str = self.acc_plus_file.format(chrom)
+                        do_plus_file: str = self.do_plus_file.format(chrom)
+                        with open(acc_plus_file, "w") as aph:
+                            aph.write(wiggle_header)
+                            for i, x in enumerate(acceptor_prob):
+                                x = round(x, self.round_to) if x >= self.min_prob else 0.0
+                                aph.write(str(x) + "\n")
+                        with open(do_plus_file, "w") as dph:
+                            dph.write(wiggle_header)
+                            for i, x in enumerate(donor_prob):
+                                x = round(x, self.round_to) if x >= self.min_prob else 0.0
+                                dph.write(str(x) + "\n")
                     else:
-                        amh.write(str(x) + "\n")
+                        acc_minus_file: str = self.acc_minus_file.format(chrom)
+                        do_minus_file: str = self.do_minus_file.format(chrom)
+                        with open(acc_minus_file, "w") as amh:
+                            amh.write(wiggle_header)
+                            for i, x in enumerate(acceptor_prob):
+                                x = round(x, self.round_to) if x >= self.min_prob else 0.0
+                                amh.write(str(x) + "\n")
+                        with open(do_minus_file, "w") as dmh:
+                            dmh.write(wiggle_header)
+                            for i, x in enumerate(donor_prob):
+                                x = round(x, self.round_to) if x >= self.min_prob else 0.0
+                                dmh.write(str(x) + "\n")
+                    # open(self.acc_plus_file, "w") as aph,
+                    # open(self.do_plus_file, "w") as dph,
+                    # open(self.acc_minus_file, "w") as amh,
+                    # open(self.do_minus_file, "w") as dmh,
+                    ## process and write the resulting values
+                    # for i, x in enumerate(donor_prob):
+                    #     x = round(x, self.round_to) if x >= self.min_prob else 0.0
+                    #     if strand:
+                    #         dph.write(str(x) + "\n")
+                    #     else:
+                    #         dmh.write(str(x) + "\n")
+                    # for i, x in enumerate(acceptor_prob):
+                    #     x = round(x, self.round_to) if x >= self.min_prob else 0.0
+                    #     if strand:
+                    #         aph.write(str(x) + "\n")
+                    #     else:
+                    #         amh.write(str(x) + "\n")
+
+                ## start recording the new Fasta entry
+                seq = ""
+                header = line[1:]
+                if not header:
+                    break
+                continue
+            if not line:
+                continue
+            seq += line
+        ## run SpliceAI for the last element
+        ## TODO: I don't like how repetitive code looks now, but moving SpliceAI
+        ## to a separate method might create too much overhead with hefty imports
+        # if header and seq:
+        #     if header[-1] not in STRANDS:
+        #         self._die(
+        #             "Sequence %s does not have indication of its strand in the Fasta header"
+        #             % header
+        #         )
+        #     strand: bool = header[-1] == "+"
+        #     chrom, start, end = self.chunk2coords[header]
+        #     start_offset, end_offset = self.chunk2offsets[header]
+        #     x = one_hot_encode("N" * (context // 2) + seq + "N" * (context // 2))[
+        #         None, :
+        #     ]
+        #     y = np.mean([models[m].predict(x) for m in range(5)], axis=0)
+        #     ## get probabilities for acceptor and donor sites
+        #     # positional probabilities
+        #     acceptor_prob: np.ndarray = y[0, :, 1]
+        #     donor_prob: np.ndarray = y[0, :, 2]
+        #     ## write the headers to the Wiggle files
+        #     wiggle_header: str = WIGGLE_HEADER_TEMPLATE.format(chrom, start + 1)
+        #     if strand:
+        #         aph.write(wiggle_header)
+        #         dph.write(wiggle_header)
+        #     else:
+        #         amh.write(wiggle_header)
+        #         dmh.write(wiggle_header)
+        #     ## process the results
+        #     ## positive strand annotation is more straightforward
+        #     # if strand:
+        #     #     start_index: int = start_offset
+        #     #     end_index: int = len(seq) - end_offset
+        #     #     acceptor_prob = acceptor_prob[start_index:end_index]
+        #     #     donor_prob = donor_prob[start_index:end_index]
+        #     # # negative strand requires some additional tweaks
+        #     # else:
+        #     #     start_index: int = end_offset
+        #     #     end_index: int = len(seq) - start_offset
+        #     #     acceptor_prob = acceptor_prob[start_index:end_index][::-1]
+        #     #     donor_prob = donor_prob[start_index:end_index][::-1]
+        #     start_index: int = start_offset
+        #     end_index: int = len(seq) - end_offset
+        #     if strand:
+        #         # start_index: int = start_offset
+        #         # end_index: int = len(seq) - end_offset
+        #         if start_index == 0:
+        #             donor_prob = donor_prob[start_index:end_index-1]
+        #             # print(f"First chunk; positive donor prob before the value insertion, length={len(donor_prob)}")
+        #             donor_prob = np.insert(donor_prob, 0, 0.0)
+        #             # print(f"First chunk; positive donor prob after the value insertion, length={len(donor_prob)}")
+        #         else:
+        #             # donor_prob = donor_prob[start_index:end_index]
+        #             donor_prob = donor_prob[start_index-1:end_index-1]
+        #             # print(f"Middle chunk; positive donor prob, length={len(donor_prob)}")
+        #         if end_offset == 0:
+        #             acceptor_prob = acceptor_prob[start_index+1:end_index]
+        #             # print(f"Last chunk; positive acceptor prob before the value insertion, length={len(acceptor_prob)}")
+        #             acceptor_prob = np.insert(acceptor_prob, len(acceptor_prob) - 1, 0.0)
+        #             # print(f"Last chunk; positive acceptor prob after the value insertion, length={len(acceptor_prob)}")
+        #         else:
+        #             acceptor_prob = acceptor_prob[start_index+1:end_index+1]
+        #             # print(f"Middle chunk; positive acceptor prob, length={len(acceptor_prob)}")
+        #     else: ## TO BE FIXED
+        #         # start_index: int = end_offset
+        #         # end_index: int = len(seq) - start_offset
+        #         if start_index == 0:
+        #             acceptor_prob = acceptor_prob[::-1][start_index:end_index-1]
+        #             # print(f"First chunk; Negative acceptor prob before inserting the value, length={len(acceptor_prob)}")
+        #             acceptor_prob = np.insert(acceptor_prob, 0, 0.0)
+        #             # print(f"First chunk; Negative acceptor prob after inserting the value, length={len(acceptor_prob)}")
+        #         else:
+        #             # acceptor_prob = acceptor_prob[::-1][start_index-1:end_index+1]
+        #             # acceptor_prob = acceptor_prob[::-1][start_index:end_index]
+        #             acceptor_prob = acceptor_prob[::-1][start_index-1:end_index-1]
+        #             # print(f"Middle chunk; negative acceptor prob, length={len(acceptor_prob)}")
+        #         if end_offset == 0:
+        #             donor_prob = donor_prob[::-1][start_index+1:end_index+1]
+        #             # print(f"Last chunk; negative donor prob before the value insertion, length={len(donor_prob)}")
+        #             donor_prob = np.insert(donor_prob, len(donor_prob) - 1, 0.0)
+        #             # print(f"Last chunk; negative donor prob after the value insertion, length={len(donor_prob)}")
+        #         else:
+        #             donor_prob = donor_prob[::-1][start_index+1:end_index+1]
+        #             # donor_prob = donor_prob[::-1][start_index:end_index]
+        #             # print(f"Middle chunk; negative donor prob, length={len(donor_prob)}")
+        #     # print(f"{strand=}, {start_offset=}, {end_offset=}, {start_index=}, {end_index=}, {len(seq)=}, {len(acceptor_prob)=}, {len(donor_prob)=}, {x.shape=}, {y.shape=}")
+
+        #     ## process and write the resulting values
+        #     for i, x in enumerate(donor_prob):
+        #         x = round(x, self.round_to) if x >= self.min_prob else 0.0
+        #         if strand:
+        #             dph.write(str(x) + "\n")
+        #         else:
+        #             dmh.write(str(x) + "\n")
+
+        #     ## write the results to the Wiggle output file
+        #     for i, x in enumerate(acceptor_prob):
+        #         x = round(x, self.round_to) if x >= self.min_prob else 0.0
+        #         if strand:
+        #             aph.write(str(x) + "\n")
+        #         else:
+        #             amh.write(str(x) + "\n")
 
 
 if __name__ == "__main__":

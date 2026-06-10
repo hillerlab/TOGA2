@@ -59,7 +59,7 @@ class ProvisionalIsoformMapper(CommandLineManager):
         verbose: Optional[bool] = False,
     ) -> None:
         self.v: bool = verbose
-        self.set_logging(log_name)
+        self.set_logging(name=log_name, toga_module="isoforms_for_gtf")
         self.run(isoform_file, bed_file, output)
 
     def run(

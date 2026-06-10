@@ -6,17 +6,12 @@ for a particular transcript ID immediately.
 """
 
 import os
-import sys
-
-LOCATION: str = os.path.dirname(os.path.abspath(__file__))
-PARENT: str = os.sep.join(LOCATION.split(os.sep)[:-1])
-sys.path.extend([LOCATION, PARENT])
 
 from typing import List, Optional
 
 import click
 import h5py
-from modules.shared import CONTEXT_SETTINGS, CommandLineManager
+from shared import CONTEXT_SETTINGS, CommandLineManager
 from numpy import bytes_
 
 # from version import __version__
@@ -54,7 +49,7 @@ class BedHdf5Indexer(CommandLineManager):
     * HDF5 is a path to output HDF5 file
     """
 
-    __slots__ = "log_file"
+    __slots__ = ("v", "log_file")
 
     def __init__(
         self,
@@ -64,7 +59,7 @@ class BedHdf5Indexer(CommandLineManager):
         verbose: Optional[bool],
     ) -> None:
         self.v: bool = verbose
-        self.set_logging(log_name)
+        self.set_logging(name=log_name, toga_module="bed_hdf5_converter")
 
         i: int = 0
         with h5py.File(out_db, "w") as f:
@@ -81,7 +76,7 @@ class BedHdf5Indexer(CommandLineManager):
                 name: str = data[3]
                 f.create_dataset(name, data=bytes_(line))
         if not i:
-            self._die("ERROR - Empty BED file provided for HDF5 indexing")
+            self._die("Empty BED file provided for HDF5 indexing")
 
 
 if __name__ == "__main__":

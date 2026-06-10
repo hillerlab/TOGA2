@@ -74,7 +74,7 @@ class IntronIcConverter(CommandLineManager):
         verbose: Optional[bool],
     ) -> None:
         self.v = verbose
-        self.set_logging(log_name)
+        self.set_logging(name=log_name, toga_module="introns2hdf5")
 
         self.bed12: click.Path = bed12
         self.intronic: click.Path = intronic

@@ -74,7 +74,7 @@ class FastaToHdf5Converter(CommandLineManager):
         verbose: Optional[bool],
     ) -> None:
         self.v: bool = verbose
-        self.set_logging(log_name)
+        self.set_logging(name=log_name, toga_module="fasta2hdf5")
 
         if exon_fasta:
             self.write_exons_for_sleasy(input, output)

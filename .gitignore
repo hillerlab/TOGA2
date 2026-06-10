@@ -17,6 +17,9 @@ src/python/modules/_run_postoga.py
 src/python/modules/_v207_patch_module.py
 call_toga2.py
 _call_toga2_v207_patcher.py
+_*
+shiny
+.github/workflows/docker.yml
 
 # current Conda configuration attempts
 _meta.yaml

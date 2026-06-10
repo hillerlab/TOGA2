@@ -1,35 +1,51 @@
-## v2.0.7b
+## v2.0.9
 * `run` mode:
-    * Replacing positional arguments with keyword arguments
-    * `--isoform_file`, `--u12_file`, and `--spliceai_dir` options are now "semi-mandatory"; the user is expected to provide the respective arguments unless the explicit deprecative flags are set
-    * Alternative input formatting with `--input_directory`, `--ref_name`, and `--query_name` shortcuts: Format your data storage tree once and enjoy simplified command line interface
+* `prepare-input` mode:
+    * Annotation and isoform file generation from GFF3/GTF files;
+* **NEW MODE**: `orthogroups` enables orthogroup modelling and generates gene family files compatible with CAFE5 input;
+
+## v2.0.8
+* `run` mode:
     * All eight CESAR2 profiles can be now provided as a single input directory with the `--cesar_profile_dir` argument.
-    * Postoga summary table (`toga.table.gz`) added to the output for `run` mode
-    * Projections of the same reference gene/transcript overlapping by absolute coding sequence coordinates are now collapsed into a single query gene regardless of their overlap by coding exon coordinates
     * `--paralogs_over_spanning` flag for swapping annotation priority
+    * revised naming notation for one-to-many genes: addoitional copies for genes with more than 26 instances in the query get the binary letter suffix ('_aa', '_ab', etc.); genes with more than 300 orthologous copies lead to a hardcoded crash.
+    * `--debug` mode (early access) for increased logging verbosity
+    * Variable project argument formats (TSV, JSON, YAML).
+* **NEW MODE**: `summary` for concise run summary generation.
+* `from-config` mode:
+    * Support for all accepted config formats (TSV, JSON, YAML).
+* `spliceai` mode:
+    * Lifting the "early access" warning (see `Minor changes`)
 * `integrate` mode:
-    * Paralogs overlapping orthologous projections are now retained as long as they contain enough novel sequence compared to the rest of the projections in the locus
-* **NEW MODE**: `postoga` for [Postoga](https://github.com/alejandrogzi/postoga) integration
-* **NEW MODE**: `sequence-alignment` for orthologous sequence alignment across multiple same-referenced TOGA2 runs (alpha version)
-* Apptainer support (see `supply/containers`):
-    * Stable local execution container image
-    * Batch manager-compatible image template
-    * Removing `toga2.py` as a container entry point
-    * Adding container support for parallel step scripts (see `supply/containers/README.md`)
-* Updated local installation
-    * Postoga installation
-    * Conda environment support
-    * Updated `bigWigToWig` version (`-bed` and `-header` options) now distributed with TOGA2
+    * Paralogs overlapping orthologous projections are now retained as long as they contain enough novel sequence compared to the rest of the projections in the locus.
+    * UTR-annotated input support
+* `prepare-input` mode:
+    * Exon sequence .2bit file for SLEASY compatibility generated along with BED and isoforms files.
+    * File names are now prepended with an optional reference name prefix.
 * Minor changes:
     * `run`:
-        * Stepwise rejection logs are now appended to `rejected_items.tsv` instead of being dumped to separate temporary files
-        * default bootstrap number in `fine_ortology_resolver` set to 5000
-        * resolving faulty imports from `shared.py` in scheduler scripts
+        * Chimeric projections are no longer accounted for when estimated the most probable/most chain-covered items in `infer_query_genes.tsv`.
+        * Transcripts with processed pseudogene projections only are now classified as *Missing* and appear in the rejection log under the `PPGENE_ONLY` label.
+        * Genes with processed pseudogene projections only are also classified as *Missing*.
+        * Safeguard against false loss status assignment based on the rejected items.
+        * Additional loss summary updated at the `finalize` step (**NOTE**: the updated data are not reflected in `meta/loss_summary_extended.tsv`).
+        * Stepwise rejection logs are now appended to `rejected_items.tsv` instead of being dumped to separate temporary files.
+        * Fixing rejection level for `GENE_TREE_REJECTION` category from `TRANSCRIPT` to `PROJECTION`.
+        * Default bootstrap number in `fine_ortology_resolver.py` set to 5000.
+        * Resolving faulty imports from `shared.py` in scheduler scripts.
+        * Temporary workarounds for conflicting paralogous/processed pseudogene projections from the rejection log in the gene loss summary module (`conservation_summary.py`).
+        * Timestamps removed from the project names and moved to `projet_args.tsv` instead.
+        * Modified protein sequence file (`protein.fa(.gz)`) generation
     * `spliceai`:
-        * overlapping coordinates bug fixed
+        * Overlapping coordinates bug fixed
+        * Missing `project_name` arg fixed
     * `sequence-alignment`:
-        * error-free exit if no sequences were found across the query list for the focal transcript
-        * fixed random seed option for PRANK
+        * Error-free exit if no sequences were found across the query list for the focal transcript
+        * PRANK is set as default sequence aligner
+        * Fixed random seed option for PRANK
+        * Query projection names added to FASTA headers if `--add_projection_names` flag if set
+        * Added proper handling for exons present in one sequence only
+        * Split codon phasing between the exons is disabled unless the `--phase_split_codons` flag is set
     * `prepare-input`:
         * trailing comma-insensitive parsing for BED fields 10 and 11
 
@@ -57,6 +73,7 @@
         * Suppressed Pandas warnings at `classification` step 
         * Transcripts which do not have a single overlapping chain are now reported at `classification` step unless legacy feature extraction procedure is enabled
         * Setting default non-canonical U12 acceptor to `equiprobable_acceptor.tsv`
+        * Proper non-canonical U12 donor profiel
         * Setting separate splice site treatment by default, replacing `--separate_splice_site_treatment` flag with `--joint_splice_site_treatment`
         * Fixed memory bin mem-to-jobs mapping for `alignment` step
         * Sequences in `nucleotide.fa` and `protein.fa` now contain only sequences from present (non-missing and non-deleted) exons

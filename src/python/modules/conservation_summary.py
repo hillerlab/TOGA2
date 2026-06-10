@@ -30,6 +30,8 @@ REDUNDANT_PARALOG: str = "REDUNDANT_PARALOG"
 REDUNDANT_PPGENE: str = "REDUNDANT_PPGENE"
 SECOND_BEST: str = "SECOND_BEST"
 IGNORED_ITEMS: Tuple[str] = ("REDUNDANT_PARALOG", "REDUNDANT_PPGENE", "SECOND_BEST")
+SPANNING_CLASSES: str = ("L", "M", "N")
+PG: str = "PG"
 
 def parse_precedence_file(file: TextIO) -> Dict[str, str]:
     """ """
@@ -53,8 +55,6 @@ def parse_precedence_file(file: TextIO) -> Dict[str, str]:
             if end - start < prev_best_end - prev_best_start:
                 tr2curr_best[tr] = (proj, start, end)
     tr2best: Dict[str, str] = {k: v[0] for k, v in tr2curr_best.items()}
-    # print(f'{tr2best["ENST00000409539.INMT"]=}')
-    # print(f'{tr2best["ENST00000013222.INMT"]=}')
     return tr2best
 
 
@@ -78,6 +78,7 @@ def transcript_meta_to_report(
     else:
         with open(file, "r") as h:
             lines: List[str] = h.readlines()
+    has_ppgenes: Set[str] = set()
     ## extract the projection loss statuses
     for line in lines:
         data: List[str] = line.strip().split("\t")
@@ -90,6 +91,8 @@ def transcript_meta_to_report(
         proj2status[proj] = status
         ## do not propagate paralog and ppgene loss status to downstream levels
         if proj in ppgenes or basename in ppgenes:
+            tr2status[tr].add("N")
+            has_ppgenes.add(tr)
             continue
         ## for paralogs, do not count the discarded projections towards the transcript classification
         if proj in paralogs:
@@ -106,10 +109,14 @@ def transcript_meta_to_report(
         tr2status[tr] = "M"
         confirmed_missing_paralogs.add(tr)
     ## infer the transcript level loss statuses and add them to output
-    for tr in tr2status:
+    for tr, all_classes in tr2status.items():
+        max_status: str = max(all_classes, key=lambda x: CLASS_TO_NUM[x])
         ## if transcript has an established precedence order (e.g., nested spanning chains),
         ## use the top projection's status as the transcript's status estimate
-        if tr in precedence:
+        if tr in precedence and max_status in SPANNING_CLASSES:
+            ## TODO: The max_status check above is a safeguard for rare quirks
+            ## when both spanning and regular orthologous projections are encountered;
+            ## will be likely redundant in 2.1
             preferred_proj: str = precedence[tr]
             basename: str = base_proj_name(preferred_proj)
             if preferred_proj in proj2status and (
@@ -118,8 +125,9 @@ def transcript_meta_to_report(
                 preferred_loss_status: str = proj2status[preferred_proj]
                 tr2status[tr] = preferred_loss_status
                 continue
-        all_classes: Set[str] = tr2status[tr]
-        max_status: str = max(all_classes, key=lambda x: CLASS_TO_NUM[x])
+        ## if a transcript does not have any projections except for ppgenes, treat it as missing
+        if max_status == "N" and tr in has_ppgenes:
+            max_status = "M"
         tr2status[tr] = max_status
 
     return (proj2status, tr2status, confirmed_missing_paralogs)
@@ -238,6 +246,8 @@ def add_rejection_data(
     reject_proj2status: Dict[str, str],
     reject_tr2status: Dict[str, str],
     precedence: Optional[Dict[str, str]] = {},
+    paralogs: Optional[Set[str]] = set(),
+    ppgenes: Optional[Set[str]] = set(),
 ) -> Tuple[Dict[str, str], Dict[str, str]]:
     """
     Updates projection- and transcript-level loss status dictionaries with
@@ -245,6 +255,7 @@ def add_rejection_data(
     if no instance of this projection or transcript was subjected to alignment,
     leaves the best loss status otherwise
     """
+    tr_from_rej_log: Set[str] = set()
     for proj, rej_proj_status in reject_proj2status.items():
         tr: str = "#".join(proj.split("#")[:-1])
         if proj not in orig_proj2status:
@@ -254,7 +265,22 @@ def add_rejection_data(
             orig_proj2status[proj] = max(
                 (orig_proj_status, rej_proj_status), key=lambda x: CLASS_TO_NUM[x]
             )
-        if tr in precedence:
+        ## do not propagate rejected paralog statuses
+        if proj in paralogs or proj in ppgenes:
+            continue
+        rej_tr_status: str = reject_tr2status[tr]
+        if tr not in orig_tr2status:
+            tr_from_rej_log.add(tr)
+            orig_tr2status[tr] = rej_tr_status
+        ## do not account for items non-spanning items
+        elif rej_proj_status not in SPANNING_CLASSES:
+            continue
+        else:
+            orig_tr_status: str = orig_tr2status[tr]
+            orig_tr2status[tr] = max(
+                (orig_tr_status, rej_tr_status), key=lambda x: CLASS_TO_NUM[x]
+            )
+        if tr in precedence and orig_tr2status in SPANNING_CLASSES:
             preferred_proj: str = precedence[tr]
             if preferred_proj in orig_proj2status:
                 preferred_loss_status: str = orig_proj2status[preferred_proj]
@@ -268,19 +294,16 @@ def add_rejection_data(
                     "from both transcript meta and rejection reports"
                 )
             continue
-        rej_tr_status: str = reject_tr2status[tr]
-        if tr not in orig_tr2status:
-            orig_tr2status[tr] = rej_tr_status
-        else:
-            orig_tr_status: str = orig_tr2status[tr]
-            orig_tr2status[tr] = max(
-                (orig_tr_status, rej_tr_status), key=lambda x: CLASS_TO_NUM[x]
-            )
     for rej_tr, rej_tr_status in reject_tr2status.items():
         if rej_tr not in orig_tr2status:
             orig_tr2status[rej_tr] = rej_tr_status
         else:
             orig_tr_status: str = orig_tr2status[tr]
+            ## TODO: This check is a safeguard for rare quirks
+            ## when both spanning and regular orthologous projections are encountered;
+            ## will be likely redundant in 2.1
+            if orig_tr_status == PG:
+                continue
             orig_tr2status[tr] = max(
                 (orig_tr_status, rej_tr_status), key=lambda x: CLASS_TO_NUM[x]
             )
@@ -425,7 +448,13 @@ def main(
         with open(rejected_projections, "r") as h:
             r_proj2status, r_tr2status = rejection_file_to_report(h)
             proj2status, tr2status = add_rejection_data(
-                proj2status, tr2status, r_proj2status, r_tr2status, spanning_status
+                proj2status, 
+                tr2status, 
+                r_proj2status,
+                r_tr2status, 
+                spanning_status,
+                paralogs=paralogs,
+                ppgenes=ppgenes,
             )
     output.write(Headers.LOSS_FILE_HEADER)
     for proj, status in proj2status.items():

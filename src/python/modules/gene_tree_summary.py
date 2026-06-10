@@ -138,7 +138,7 @@ class GeneTreeSummary(CommandLineManager):
         verbose: Optional[bool],
     ) -> None:
         self.v: bool = verbose
-        self.set_logging(log_name)
+        self.set_logging(name=log_name, toga_module="tree_summary")
 
         output.write(Headers.TREE_SUMMARY_HEADER)
         batches: List[str] = [

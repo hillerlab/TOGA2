@@ -171,7 +171,7 @@ class FeatureAggregator(CommandLineManager):
         verbose: Optional[bool],
     ) -> None:
         self.v: bool = verbose
-        self.set_logging(log_name)
+        self.set_logging(name=log_name, toga_module="merge_chain_features")
 
         self.only_covering: bool = exon_cov_chains
         self.ref_bed: Dict[str, TranscriptFeatures] = {}

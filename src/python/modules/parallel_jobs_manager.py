@@ -186,6 +186,7 @@ class NextflowStrategy(ParallelizationStrategy):
         ## write the populated boilerplate to a file
         with open(config_path, "w") as h:
             h.write(config_body + "\n")
+        print(f"{config_path=}")
         return config_path
 
     # def __create_config_file(self):

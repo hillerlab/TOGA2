@@ -226,6 +226,9 @@ class ChainClassifier(CommandLineManager):
 
         self.run()
 
+    def set_logging(self, log_name: Union[str, None]) -> None:
+        super().set_logging(name=log_name, toga_module="classification")
+
     def _load_model(self, model_path: click.Path) -> Any:
         """
         Uploads XGBoost classification model
@@ -313,6 +316,9 @@ class ChainClassifier(CommandLineManager):
 
         ## if long distance model is specified, convert predictions
         if self.ld_model is not None:
+            self._to_log("Applying the long-distance model")
+            se_before: int = df_se[df_se["pred"] >= self.orthology_threshold].shape[0]
+            me_before: int = df_me[df_me["pred"] >= self.orthology_threshold].shape[0]
             df_se = df_se.rename({"pred": "score"}, axis="columns").assign(
                 single_exon=1
             )
@@ -333,6 +339,17 @@ class ChainClassifier(CommandLineManager):
             )
             df_se["pred"] = se_ld_pred
             df_me["pred"] = me_ld_pred
+            se_after: int = df_se[df_se["pred"] >= self.orthology_threshold].shape[0]
+            me_after: int = df_me[df_me["pred"] >= self.orthology_threshold].shape[0]
+            self._to_log(
+                (
+                    "Orthologs predicted: \n"
+                    "\tsingle-exon, default model: %s\n"
+                    "\tmulti-exon, default model: %s\n"
+                    "\tsingle-exon, long distance model: %s\n"
+                    "\tmulti-exon, long distance model: %s"
+                ) % (se_before, me_before, se_after, me_after)
+            )
 
         ## assign a probability placeholder of -1 to spanning projections
         spanning_lines["pred"] = -1
@@ -463,11 +480,21 @@ class ChainClassifier(CommandLineManager):
 
         ## second, detect and record unclassified genes
         rejected_transcripts: Set[str] = init_tr_set.difference(set(results.transcript))
-        if not rejected_transcripts and not self.underscored_chain_projections:
+        ppgene_only: Set[str] = set(
+            results[results["pred"] != 2.0].transcript
+        ).difference(set(results.transcript))
+        if (
+            not rejected_transcripts and 
+            not self.underscored_chain_projections and 
+            not ppgene_only 
+        ):
             return
         with open(self.rejection_log, "w") as h:
             for tr in rejected_transcripts:
                 rej_line: str = RejectionReasons.UNCLASS_REJ_REASON.format(tr)
+                h.write(rej_line + "\n")
+            for tr in ppgene_only:
+                rej_line: str - RejectionReasons.PPGENE_ONLY_REASON.format(tr)
                 h.write(rej_line + "\n")
             for proj in self.underscored_chain_projections:
                 rej_line: str = RejectionReasons.UNDERSCORED_REJ_REASON.format(

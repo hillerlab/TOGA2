@@ -5,3 +5,7 @@
 [submodule "bed2gtf"]
 	path = bed2gtf
 	url = https://github.com/alejandrogzi/bed2gtf
+
+[submodule "CESAR2.0"]
+	path = CESAR2.0
+	url = https://github.com/hillerlab/CESAR2.0

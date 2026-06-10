@@ -19,7 +19,7 @@ from .constants import Headers, RejectionReasons
 from .filter_ref_bed import consistent_name
 from .shared import CommandLineManager, dir_name_by_date, get_upper_dir, hex_dir_name
 
-logging.basicConfig(level=logging.INFO)
+logging.root.handlers = []
 
 DEFAULT_PREFIX: str = "TOGA2_ref_annotation"
 LEVEL: str = "level"
@@ -46,18 +46,60 @@ NUCS: Tuple[str, ...] = ("A", "T", "C", "G")
 N: str = "N"
 CANON: str = "canon"
 NONCANON: str = "nonCanon"
+SEP_DUMMY: str = "n"
+NAME: str = "name"
 
 TOGA2_ROOT: str = get_upper_dir(__file__, 4)
 DEFAULT_TWOBITTOFA: str = os.path.join(TOGA2_ROOT, "bin", "twoBitToFa")
 DEFAULT_BED2FRACTION: str = os.path.join(
     TOGA2_ROOT, "src", "rust", "target", "release", "bed12ToFraction"
 )
-DEFAULT_INTRONIC: str = os.path.join(TOGA2_ROOT, "bin", "intronIC", "intronIC", "intronIC.py")
 PROFILE_DIR: str = "CESAR2.0_profiles"
 EQUI_ACC: str = "equiprobable_acceptor.tsv"
 EQUI_DONOR: str = "equiprobable_donor.tsv"
 DEFAULT_MEMORY_LIMIT: int = 24
 EXTRACTION_ERR_MSG: str = "ERROR: twoBitToFa call failed"
+CONVERSION_ERR_MSG: str = "ERROR: FASTA to 2bit conversion failed"
+BED12TO6_ERR: str = "BED12 to BED6 conversion failed:"
+
+TRANSCRIPTS: str = "toga.transcripts.bed"
+ISOFORMS: str = "toga.isoforms.tsv"
+U12_FILE: str = "toga.U12introns.bed"
+SLEASY: str = "sleasy.exons.2bit"
+REJ_LOG: str = "rejected_items.tsv"
+EXON_BED6: str = "all_exons.bed6"
+FA_FOR_SLEASY: str = "all_exons.fasta"
+
+ATTR2BIN: Dict[str, str] = {
+    "twobittofa_binary": "twoBitToFa",
+    "fatotwobit_binary": "faToTwoBit",
+    "intronic_binary": "intronIC",
+}
+DEFAULT_TWOBIT2FA: str = os.path.join(TOGA2_ROOT, "bin", "twoBitToFa")
+DEFAULT_FA2TWOBIT: str = os.path.join(TOGA2_ROOT, "bin", "faToTwoBit")
+DEFAULT_INTRONIC: str = os.path.join(
+    TOGA2_ROOT, "bin", "intronIC", "intronIC", "intronIC.py"
+)
+BIN2DEFAULT: Dict[str, str] = {
+    "twoBitToFa": DEFAULT_TWOBIT2FA,
+    "faToTwoBit": DEFAULT_FA2TWOBIT,
+    "intronIC": DEFAULT_INTRONIC,
+}
+
+
+def add_prefix(template: str, prefix: Optional[Union[str, None]] = "") -> str:
+    """Adds a prefix to the output file name
+
+    Args:
+        prefix: A prefix to add to the file name. Can be empty.
+        template: A file name template.
+
+    Returns:
+        A filename in {prefix}.{template} if prefix is non-empty, {template} otherwise.
+    """
+    if not prefix:
+        return template
+    return f"{prefix}.{template}"
 
 
 class InputProducer(CommandLineManager):
@@ -73,16 +115,24 @@ class InputProducer(CommandLineManager):
         "disable_intron_classification",
         "disable_cesar_profiles",
         "output",
+        "contigs",
+        "excluded_contigs",
+        "intronic_cores",
         "filtered_annotation",
         "filtered_isoforms",
+        "sleasy_2bit",
         "rejection_log",
+        "bed6_exons",
+        "fasta_for_sleasy",
         "tr2annot",
         "rejected_transcripts",
         "rejected_lines",
         "intronic",
         "ic_cores",
         "twobittofa_binary",
+        "fatotwobit_binary",
         "bed2fraction_binary",
+        "intronic_binary",
         "tmp_dir",
         "intron_file",
         "all_intron_bed",
@@ -101,6 +151,7 @@ class InputProducer(CommandLineManager):
         ref_annot: click.Path,
         ref_isoforms: Optional[click.Path] = None,
         output: Optional[Union[click.Path, None]] = None,
+        prefix: Optional[str] = "",
         disable_transcript_filtering: Optional[bool] = False,
         contigs: Optional[Union[str, None]] = None,
         excluded_contigs: Optional[Union[str, None]] = None,
@@ -112,6 +163,7 @@ class InputProducer(CommandLineManager):
             int
         ] = MIN_INTRON_LENGTH_FOR_CLASSIFICATION,
         twobittofa_binary: Optional[Union[click.Path, None]] = None,
+        fatotwobit_binary: Optional[Union[click.Path, None]] = None,
         min_intron_length_cesar: Optional[int] = MIN_INTRON_LENGTH_FOR_PROFILES,
         keep_temporary: Optional[bool] = False,
     ) -> None:
@@ -121,62 +173,84 @@ class InputProducer(CommandLineManager):
         self.twobit: click.Path = ref_2bit
         self.annot: click.Path = ref_annot
         self.isoforms: Union[click.Path, None] = ref_isoforms
+        self.contigs: Union[str, None] = contigs
+        self.excluded_contigs: Union[str, None] = excluded_contigs
+        self.disable_intron_classification: bool = disable_intron_classification
+        self.disable_cesar_profiles: bool = disable_cesar_profiles
+        self.min_intron_length_intronic: int = min_intron_length_intronic
+        self.min_intron_length_cesar: int = min_intron_length_cesar
         self.output: str = (
             output if output is not None else hex_dir_name(DEFAULT_PREFIX)
         )
+        self.tmp_dir: str = os.path.join(self.output, dir_name_by_date("tmp"))
         self.keep_tmp: bool = keep_temporary
 
-        self._mkdir(self.output)
-        self.filtered_annotation: str = os.path.join(
-            self.output, "toga.transcripts.bed"
+        self.filtered_annotation: os.PathLike = os.path.join(
+            self.output, add_prefix(TRANSCRIPTS, prefix)
         )
-        self.filtered_isoforms: str = os.path.join(self.output, "toga.isoforms.tsv")
-        self.rejection_log: str = os.path.join(self.output, "rejected_items.tsv")
+        self.filtered_isoforms: os.PathLike = os.path.join(
+            self.output, add_prefix(ISOFORMS, prefix)
+        )
+        self.sleasy_2bit: os.PathLike = os.path.join(
+            self.output, add_prefix(SLEASY, prefix)
+        )
+        self.rejection_log: str = os.path.join(self.output, REJ_LOG)
+
+        self.bed6_exons: os.PathLike = os.path.join(self.tmp_dir, EXON_BED6)
+        self.fasta_for_sleasy: os.PathLike = os.path.join(self.tmp_dir, FA_FOR_SLEASY)
+
+        self.intron_file: os.PathLike = os.path.join(
+            self.output, add_prefix(U12_FILE, prefix)
+        )
+        self.all_intron_bed: os.PathLike = os.path.join(self.tmp_dir, "all_introns.bed")
+
+        self.twobittofa_binary: Union[os.PathLike, None] = twobittofa_binary
+        self.fatotwobit_binary: Union[os.PathLike, None] = fatotwobit_binary
+        self.intronic_binary: Union[os.PathLike, None] = intronic_binary
+        self.bed2fraction_binary: str = DEFAULT_BED2FRACTION
+        self.intronic_cores: int = intronic_cores
 
         self.tr2annot: Dict[str, str] = {}
         self.rejected_transcripts: List[str] = []
         self.rejected_lines: List[str] = []
 
-        ## step 1: annotation file check
-        self.check_annotation(contigs, excluded_contigs)
+        self.run()
 
+    def run(self) -> None:
+        """Entry point"""
+        ## checking all the necessary binaries
+        self._to_log("Checking the necessary binaries")
+        ## create output directory
+        self._to_log("Checking binaries")
+        self.check_binaries()
+        self._to_log("Creating output directory")
+        self._mkdir(self.output)
+        self._mkdir(self.tmp_dir)
+        ## step 1: annotation file check
+        self._to_log("Refining the reference annotation BED file")
+        self.check_annotation()
         ## step 2, optional: isoform file check, potential further annotation filtering
         if self.isoforms is not None:
+            self._to_log("Refining the input isoform file")
             self.check_isoforms()
-
         ## write the results for steps 1 and 2
+        self._to_log("Writing the annotation results")
         self.write_annotation()
         self.write_rejection_log()
-        self.disable_intron_classification: bool = disable_intron_classification
-        self.disable_cesar_profiles: bool = disable_cesar_profiles
-
-        ## step 3: intron classification, U12 input file preparation
-        if not disable_intron_classification:
-            self.tmp_dir: str = os.path.join(
-                self.output, dir_name_by_date("tmp.intronIC")
-            )
-            self.intronic: Union[click.Path, None] = self.check_intronic_binary(
-                intronic_binary
-            )
-            self.ic_cores: int = intronic_cores
-            self.twobittofa_binary: str = (
-                twobittofa_binary
-                if twobittofa_binary is not None
-                else DEFAULT_TWOBITTOFA
-            )
-            self.bed2fraction_binary: str = DEFAULT_BED2FRACTION
-            self.min_intron_length_intronic: int = min_intron_length_intronic
-            if not disable_cesar_profiles:
+        ## step 3: exon 2bit file
+        self._to_log("Creating 2bit exon sequence storage for SLEASY")
+        self.create_sleasy_input()
+        ## step 4: intron classification, U12 input file preparation
+        if not self.disable_intron_classification:
+            if not self.disable_cesar_profiles:
                 self.intron2class: Dict[str, Tuple[str, str]] = {}
                 self.intron2coords: Dict[str, Tuple[str, int, int, bool]] = {}
-                self.min_intron_length_cesar: int = min_intron_length_cesar
-            self.intron_file: str = os.path.join(self.output, "toga.U12introns.bed")
-            self.all_intron_bed: str = os.path.join(self.tmp_dir, "all_introns.bed")
-            self._mkdir(self.tmp_dir)
+            self._to_log("Classifying reference introns")
             self.intron_classifier()
 
-        ## step 4: CESAR2 profile generation; will not shoot if step 3 is disabled
-        if not (disable_intron_classification or disable_cesar_profiles):
+        ## step 5: CESAR2 profile generation; will not shoot if step 3 is disabled
+        if not (self.disable_intron_classification or self.disable_cesar_profiles):
+            self._to_log("Generating CESAR profiles")
             self.profiles: Dict[Tuple[str, bool, str], Dict[int, Dict[str, int]]] = (
                 defaultdict(lambda: defaultdict(lambda: defaultdict(int)))
             )
@@ -184,9 +258,100 @@ class InputProducer(CommandLineManager):
             self._mkdir(self.profile_dir)
             self.generate_cesar_profiles()
 
-    def check_annotation(
-        self, contigs: Union[str, None], excluded_contigs: Union[str, None]
-    ) -> None:
+    def check_binaries(self) -> None:
+        """Checks binary availability and execution permissions for all third-party programs.
+
+        Since the input is provided from the click Python CLI, the existence
+        of non-empty option value is basically guaranteed at this point;
+        nevertheless, the code further checks whether the provided binary
+        instance is executable.
+
+        If no value is provided, the method searches for binary availability in $PATH.
+        Once it is found, the execution permissions are further ensured.
+
+        The method throws error if no (executable)  instance is found. The only exception is
+        intronIC absence if `--disable_intron_classification` flag was set
+        """
+        for attr, exp_name in ATTR2BIN.items():
+            binary: Union[str, None] = getattr(self, attr)
+            if binary is not None:
+                self._to_log("Testing %s binary at %s" % (exp_name, binary))
+                if os.access(binary, os.X_OK):
+                    self._to_log(
+                        "The provided binary is executable; using the stated %s instance"
+                        % exp_name
+                    )
+                    setattr(self, attr, binary)
+                    continue
+                else:
+                    self._to_log(
+                        (
+                            "%s binary at %s does not seem executable; "
+                            "looking for alternatives"
+                        )
+                        % (exp_name, binary),
+                        "warning",
+                    )
+            else:
+                self._to_log(
+                    ("No %s executable was provided; looking for alternatives")
+                    % exp_name
+                )
+            ## check for the default version in bin/
+            default_binary: str = BIN2DEFAULT[exp_name]
+            if os.path.exists(default_binary):
+                self._to_log(
+                    "Found %s instance at %s; checking the execution permissions"
+                    % (exp_name, default_binary)
+                )
+                if os.access(default_binary, os.X_OK):
+                    self._to_log(
+                        "The found binary is executable; using the TOGA2-supplied %s instance"
+                        % default_binary
+                    )
+                    setattr(self, attr, default_binary)
+                    continue
+                self._to_log(
+                    "TOGA2-supplied %s at %s is not executable; looking for alternatives in $PATH"
+                    % (exp_name, default_binary)
+                )
+            else:
+                self._to_log(
+                    "%s is missing at %s; looking for alternatives in $PATH"
+                    % (exp_name, default_binary)
+                )
+            binary_in_path: Union[str, None] = which(exp_name)
+            if binary_in_path is not None:
+                self._to_log(
+                    "Found %s instance at %s; checking the execution permissions"
+                    % (exp_name, binary_in_path)
+                )
+                if os.access(binary_in_path, os.X_OK):
+                    self._to_log(
+                        "The found binary is executable; using the found %s instance"
+                        % binary_in_path
+                    )
+                    setattr(self, attr, binary_in_path)
+                    continue
+                self._die(
+                    (
+                        "The %s binary found in $PATH at %s is not executable; "
+                        "check your $PATH or provide a valid %s instance"
+                    )
+                    % (exp_name, binary_in_path, exp_name)
+                )
+            if exp_name == "intronIC" and self.disable_intron_classification:
+                self._to_log("No available intronIC instance was found; skipping")
+                continue
+            self._die(
+                (
+                    "No %s binary found in $PATH; "
+                    "check your $PATH or provide a valid %s instance"
+                )
+                % (exp_name, exp_name)
+            )
+
+    def check_annotation(self) -> None:
         """
         Filters reference annotation by the following criteria:
         * All transcripts in the final annotation must be
@@ -236,10 +401,10 @@ class InputProducer(CommandLineManager):
                 chrom: str = data[0]
                 ## if entries were restricted to specific contigs,
                 ## apply the respective filters
-                if contigs and chrom not in contigs:
+                if self.contigs and chrom not in self.contigs:
                     rejected_contigs.append(name)
                     continue
-                if excluded_contigs and chrom in excluded_contigs:
+                if self.excluded_contigs and chrom in self.excluded_contigs:
                     rejected_contigs.append(name)
                     continue
                 ## check coding sequence presence and frame intactness
@@ -429,87 +594,77 @@ class InputProducer(CommandLineManager):
             for line in self.rejected_lines:
                 h.write(line + "\n")
 
-    def check_intronic_binary(self, binary: Union[str, None]) -> str:
-        """
-        Checks intronIC binary availability and execution permissions.
+    def create_sleasy_input(self) -> None:
+        """Creates a 2bit exon storage for SLEASY compatibility"""
 
-        Since the input is provided from the click Python CLI, the existence
-        of non-empty option value is basically guaranteed at this point;
-        nevertheless, the code further checks whether the provided intronIC
-        instance is executable.
-
-        If no value is provided, the method searches for intronIC availability in $PATH.
-        Once it is found, the execution permissions are further ensured.
-
-        The method throws error if no (executable) intronIC instance is found.
-        """
-        if binary is not None:
-            self._to_log("Testing intronIC binary at %s" % binary)
-            if os.access(binary, os.X_OK):
-                self._to_log(
-                    "The provided binary is executable; using the stated intronIC instance"
-                )
-                return binary
-            else:
-                self._to_log(
-                    (
-                        "intronIC binary at %s does not seem executable; "
-                        "looking for alternatives"
-                    )
-                    % binary,
-                    "warning",
-                )
-        else:
-            self._to_log(
-                (
-                    "No intronIC executable was provided; "
-                    "looking for alternatives"
-                )
-            )
-        ## check for the default version in bin/
-        if os.path.exists(DEFAULT_INTRONIC):
-            self._to_log(
-                "Found intronIC instance at %s; checking the execution permissions"
-                % DEFAULT_INTRONIC
-            )
-            if os.access(DEFAULT_INTRONIC, os.X_OK):
-                self._to_log(
-                    "The found binary is executable; using the TOGA2-supplied intronIC instance"
-                )
-                return DEFAULT_INTRONIC
-            self._to_log(
-                "TOGA2-supplied intronIC at %s is not executable; looking for alternatives in $PATH"
-                % DEFAULT_INTRONIC
-            )
-        else:
-            self._to_log(
-                "intronIC is missing at %s; looking for alternatives in $PATH" 
-                % DEFAULT_INTRONIC
-            )
-        intronic_in_path: Union[str, None] = which("intronIC")
-        if intronic_in_path is not None:
-            self._to_log(
-                "Found intronIC instance at %s; checking the execution permissions"
-                % intronic_in_path
-            )
-            if os.access(intronic_in_path, os.X_OK):
-                self._to_log(
-                    "The found binary is executable; using the stated intronIC instance"
-                )
-                return intronic_in_path
-            self._die(
-                (
-                    "The intronIC binary found in $PATH at %s is not executable; "
-                    "check your $PATH or provide a valid intronIC instance"
-                )
-                % intronic_in_path
-            )
-        self._die(
-            (
-                "No intronIC binary found in $PATH; "
-                "check your $PATH or provide a valid intronIC instance"
-            )
+        self._to_log("Writing temporary BED6 file")
+        bed6_cmd: str = (
+            f"{self.bed2fraction_binary} -i {self.annot} -m cds -b | "
+            "sort -k4,4 -k5,5n | "
+            f"awk -F'\t' '{{print $1,$2,$3,$4\"_exon\"$5,$5,$6}}' > {self.bed6_exons}"
         )
+        _ = self._exec(bed6_cmd, BED12TO6_ERR)
+        self._to_log("Writing temporary BED6 file complete")
+
+        self._to_log("Extracting sequences from the 2bit file; might take time")
+        twobit2fa_cmd: str = (
+            f"{self.twobittofa_binary} -bed={self.bed6_exons} {self.twobit} stdout"
+        )
+        fasta_lines: str = self._exec(
+            twobit2fa_cmd, EXTRACTION_ERR_MSG, gather_stdout=True
+        )
+        self._to_log("Sequence extraction complete")
+
+        self._to_log("Writing temporary FASTA file")
+        with open(self.fasta_for_sleasy, "w") as h:
+            name: str = ""
+            exon: int = 0
+            prev_name: str = ""
+            prev_exon: int = 0
+            curr_seq: str = ""
+            new_exon: bool = True
+            for line in fasta_lines.split("\n"):
+                if not line:
+                    continue
+                if line[0] == ">":
+                    name, exon = line.lstrip(">").split("_exon")
+                    # print(f'{name=}, {exon=}, {prev_name=}, {prev_exon=}')
+                    if not prev_name:
+                        prev_name = name
+                    exon: int = int(exon)
+                    if name != prev_name and prev_name:
+                        # print(f'{prev_name=}, {name=}, {prev_exon=}, {exon=}')
+                        h.write(">" + prev_name + "\n" + curr_seq + "\n")
+                        curr_seq = ""
+                        prev_name = name
+                        prev_exon = 0
+                        # print(f'{prev_name=}, {name=}, {prev_exon=}, {exon=}')
+                    if prev_exon >= exon:
+                        self._die(
+                            (
+                                "Temporary BED file was improperly sorted; "
+                                "check that twoBitToFa returned sequences as presented in the BED file. "
+                                "Troublemaker: %s, exons %i-%i"
+                            )
+                            % (name, prev_exon, exon)
+                        )
+                    prev_exon = exon
+                    new_exon: bool = exon > 1
+                    continue
+                if new_exon:
+                    curr_seq += SEP_DUMMY
+                    new_exon = False
+                curr_seq += line.upper()
+            if curr_seq:
+                h.write(">" + prev_name + "\n" + curr_seq + "\n")
+        self._to_log("Writing temporary FASTA file complete")
+
+        self._to_log("Converting reference exons into 2bit format")
+        fa2twobit_cmd: str = (
+            f"{self.fatotwobit_binary} {self.fasta_for_sleasy} {self.sleasy_2bit}"
+        )
+        _ = self._exec(fa2twobit_cmd, CONVERSION_ERR_MSG)
+        self._to_log("Execution successfully completed; cleaning up and exiting")
 
     def intron_classifier(self) -> None:
         """
@@ -549,11 +704,10 @@ class InputProducer(CommandLineManager):
         self._to_log("Running intronIC")
         ic_output: str = os.path.join(self.tmp_dir, "output")
         intronic_cmd: str = (
-            f"{self.intronic} -g {genome_fasta} -b {intron_bed} -n {ic_output} "
-            f"-p {self.ic_cores}  --min_intron_len {self.min_intron_length_intronic} "
+            f"{self.intronic_binary} -g {genome_fasta} -b {intron_bed} -n {ic_output} "
+            f"-p {self.intronic_cores}  --min_intron_len {self.min_intron_length_intronic} "
             "--no_nc_ss_adjustment --no_abbreviate"
         )
-        print(f"{intronic_cmd=}")
         _ = self._exec(intronic_cmd, "intronIC run failed:")
         ## now, prepare the final file
         ## parse the output bed file
@@ -567,7 +721,7 @@ class InputProducer(CommandLineManager):
                 data: List[str] = line.strip().split("\t")
                 if not data:
                     continue
-                if len(data) != 6:
+                if len(data) < 6:
                     self._die(
                         (
                             "Improper intronIC bed file formatting at line % i; "
@@ -577,7 +731,7 @@ class InputProducer(CommandLineManager):
                     )
                 name: str = data[3].split(";")[0]
                 ## convert the probability into a Bed-compatible score
-                score: int = 0 if data[4] == "." else int(float(data[4]) * 10)
+                score: int = 0 if (data[4] == "." or data[4] == "NA") else int(float(data[4]) * 10)
                 # intron2coords[name] = f'{data[0]}\t{data[1]}\t{data[2]}\t{{}}\t{score}\t{data[5]}'
                 intron2coords[name] = (
                     data[0],
@@ -603,14 +757,16 @@ class InputProducer(CommandLineManager):
                 data: List[str] = line.strip().split("\t")
                 if not data:
                     continue
-                if len(data) != 14:
+                if len(data) < 14:
                     self._die(
                         (
                             "Improper intronIC file formatting at line % i; "
-                            "expected 14 fields, got %i"
+                            "expected at least 14 fields, got %i"
                         )
                         % (i, len(data))
                     )
+                if data[0] == NAME:
+                    continue
                 name: str = data[0].split(";")[0]
                 dinuc: str = data[2]
                 intron_class: str = data[12].upper()
@@ -792,6 +948,6 @@ class InputProducer(CommandLineManager):
             self.profiles[key][pos][nuc] += 1
 
     def set_logging(self) -> None:
-        """Sets logging and disables logging propagation"""
-        super().set_logging()
+        """Sets up logging system for a InputProducer instance"""
+        super().set_logging(toga_module="prepare-input")
         self.logger.propagate = False

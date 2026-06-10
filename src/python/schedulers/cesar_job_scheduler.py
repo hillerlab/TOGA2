@@ -454,6 +454,15 @@ def fragmented_projection(chain_id: str) -> bool:
     ),
 )
 @click.option(
+    "--log_name",
+    "-ln",
+    type=str,
+    metavar="STR",
+    default=None,
+    show_default=True,
+    help="Logger name to use; relevant only upon main class import",
+)
+@click.option(
     "--verbose",
     "-v",
     metavar="FLAG",
@@ -563,8 +572,12 @@ class CesarScheduler(CommandLineManager):
         container_executor: str,
         bindings: Optional[Union[str, None]],
         toga1_compatible: Optional[bool],
+        log_name: Optional[str],
         verbose: bool,
     ) -> None:
+        self.v: bool = verbose
+        self.set_logging(name=log_name, toga_module="alignment_scheduler")
+
         self.memory_report: click.File = memory_report
         self.job_directory: click.Path = job_directory
         self.cesar_output_directory: click.Path = cesar_output_directory
@@ -633,7 +646,6 @@ class CesarScheduler(CommandLineManager):
         self.ignore_alternative_frame: bool = ignore_alternative_frame
         self.save_cesar_input: bool = save_cesar_input
         self.toga1: bool = toga1_compatible
-        self.v: bool = verbose
 
         self.proj2max_mem: Dict[str, float] = {}
         self.proj2sum_mem: Dict[str, int] = {}

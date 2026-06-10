@@ -7,6 +7,7 @@ prepares a complete UCSC BigBed report file
 
 import os
 from collections import defaultdict
+from get_names_from_bed import BedNameRetriever
 from typing import Any, Dict, List, Optional, Set, TextIO, Tuple, Union
 
 import click
@@ -206,6 +207,7 @@ class BigBedProducer(CommandLineManager):
         "bedtobigbed_binary",
         "ixixx_binary",
         "log_file",
+        "log_name",
     )
 
     def __init__(
@@ -233,7 +235,8 @@ class BigBedProducer(CommandLineManager):
     ) -> None:
         self.v: bool = verbose
         self.log_file: click.Path = log_file
-        self.set_logging(log_name)
+        self.log_name: str = log_name
+        self.set_logging(name=self.log_name, toga_module="ucsc_track")
 
         # self.prefix: str = prefix
         self.longest_word: int = 0
@@ -384,11 +387,19 @@ class BigBedProducer(CommandLineManager):
         )
         _ = self._exec(bigbed_cmd, "bedToBigBed failed")
         self._to_log("BigBed file successfully created")
-        self._to_log("Creating BigBed indices")
-        bed_ix_cmd: str = (
-            f"{MAKE_IX_SCRIPT} {self.out_bed_file} | sort -u > {self.bed_index}"
+        self._to_log("Retrieving names from the BED file")
+        BedNameRetriever(
+            (
+                "--input", 
+                self.out_bed_file, 
+                "--output", 
+                self.bed_index, 
+                "--log_name", 
+                self.log_name
+            ),
+            standalone_mode=False
         )
-        _ = self._exec(bed_ix_cmd, "BED file indexing failed")
+        self._to_log("Creating BigBed indices")
         bigbed_ix_cmd: str = (
             f"{self.ixixx_binary} {self.bed_index} {self.bigbed_index} {self.bigbed_ixx} "
             f"-maxWordLength={self.longest_word}"

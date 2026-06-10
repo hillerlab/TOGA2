@@ -302,7 +302,8 @@ wget -P bin/ https://github.com/iqtree/iqtree2/releases/download/v2.4.0/iqtree-2
         return "IqTree2"
 
 
-INSTALLERS: Tuple[Installer] = (IntronIcInstaller, PrankInstaller, IqTree2Installer)
+# INSTALLERS: Tuple[Installer] = (IntronIcInstaller, PrankInstaller, IqTree2Installer)
+INSTALLERS: Tuple[Installer] = (PrankInstaller, IqTree2Installer)
 
 INTRONIC_INSTALL_CMD: str = """
 wget -P bin https://github.com/glarue/intronIC/archive/refs/tags/v1.5.2.tar.gz && \

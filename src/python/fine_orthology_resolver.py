@@ -341,7 +341,8 @@ class FineOrthologyResolver(CommandLineManager):
                 if line[0] != ">":
                     continue
                 orig_name = line[1:]
-                iqtree_compatible: str = orig_name.replace("#", "_").replace(",", "_")
+                iqtree_compatible: str = orig_name.replace(
+                    "#", "_").replace(",", "_").replace(":", "_")
                 self.original_names[iqtree_compatible] = orig_name
 
     def run_prank(self, in_file: str, out_pref: str) -> None:
