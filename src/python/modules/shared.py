@@ -13,7 +13,7 @@ import sys
 import time
 from datetime import datetime
 from logging import Formatter
-from shutil import copy2, rmtree
+from shutil import copy2, move, rmtree
 from typing import Any, Dict, Iterable, List, Optional, Set, TextIO, Tuple, Union
 
 import click
@@ -780,7 +780,7 @@ class CommandLineManager:
             self._to_log(msg, "critical")
         sys.exit(1)
 
-    def _cp(self, from_: str, to_: str) -> None:
+    def _cp(self, from_: os.PathLike, to_: os.PathLike) -> None:
         """Copies file from from_ to to_"""
         try:
             copy2(from_, to_)
@@ -791,45 +791,48 @@ class CommandLineManager:
                 + e
             )
 
-    def _mkdir(self, d: str) -> None:
+    def _mkdir(self, d: os.PathLike) -> None:
         """Safe directory creation method"""
         try:
             os.makedirs(d)
         except FileExistsError:
             pass
 
-    def _rm(self, f: str) -> None:
+    def _rm(self, f: os.PathLike) -> None:
         """File deletion method"""
         try:
             if os.path.isfile(f):
                 os.remove(f)
             elif os.path.isdir(f):
-                rmtree(f, ignore_errors=True)
+                self._rmdir(f)
         except FileNotFoundError:
             pass
         except Exception:
             self._die("Unexpected behavior observed while trying to remove %s" % f)
 
-    def _rmdir(self, d: str) -> None:
+    def _rmdir(self, d: os.PathLike) -> None:
         """Recursive directory deletion method"""
         try:
-            rmtree(d, ignore_errors=True)
+            if os.path.islink(d):
+                path: os.PathLike = os.readlink(d)
+                rmtree(path, ignore_errors=True)
+                os.remove(d)
+            else:
+                rmtree(d, ignore_errors=True)
         except FileNotFoundError:
             pass
+        except Exception:
+            self._die("Unexpected behavior observed while trying to remove %s" % d)
 
-    def _mv(self, file: str, dest: str) -> None:
+    def _mv(self, file: os.PathLike, dest: os.PathLike) -> None:
         """Moves a file or directory to a new location"""
-        os.replace(file, dest)
+        move(file, dest)
 
-    def _abspath(self, path: str) -> str:
+    def _abspath(self, path: os.PathLike) -> str:
         """Checks whether a path is absolute, prepends root prefix if not"""
         if os.path.isabs(path):
             return path
         return os.path.abspath(path)
-
-    def _cp(self, file: str, dest: str) -> None:
-        """Copies a file to a new destination"""
-        copy2(file, dest)
 
     def _exec(
         self,
