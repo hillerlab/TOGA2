@@ -548,7 +548,7 @@ class InputProducer(CommandLineManager):
                     "isoforms file because all the respective "
                     "transcripts were removed from the annotation:\n\t%s"
                 )
-                % "\n\t".join(rejected_genes),
+                % "\n\t".join(map(str, rejected_genes)),
                 "warning",
             )
             self.rejected_lines.extend(
@@ -563,9 +563,9 @@ class InputProducer(CommandLineManager):
                 (
                     "The following transcripts were removed from the "
                     "annotation because they were not mapped to any gene "
-                    "in the isoform file"
+                    "in the isoform file:\n%s"
                 )
-                % "\n\t".join(rejected_transcripts),
+                % "\n\t".join(map(str, rejected_transcripts)),
                 "warning",
             )
             self.rejected_lines.extend(
