@@ -189,19 +189,19 @@ class TogaMain(CommandLineManager):
         self.timestamp: str = timestamp()
 
         ## command line-configured attributes
-        self.ref_2bit: os.PathLike = self._abspath(ref_2bit)
-        self.query_2bit: os.PathLike = self._abspath(query_2bit)
-        self.chain_file: os.PathLike = self._abspath(chain_file)
-        self.ref_annotation: os.PathLike = self._abspath(ref_annotation)
+        self.ref_2bit: str = self._abspath(ref_2bit)
+        self.query_2bit: str = self._abspath(query_2bit)
+        self.chain_file: str = self._abspath(chain_file)
+        self.ref_annotation: str = self._abspath(ref_annotation)
 
-        self.isoform_file: Union[os.PathLike, None] = self._abspath(isoform_file)
+        self.isoform_file: Optional[str] = self._abspath(isoform_file)
         self.no_isoform_file: bool = no_isoform_file
-        self.u12_file: Union[os.PathLike, None] = self._abspath(u12_file)
+        self.u12_file: Optional[str] = self._abspath(u12_file)
         self.no_u12_file: bool = no_u12_file
-        self.spliceai_dir: Union[os.PathLike, None] = self._abspath(spliceai_dir)
+        self.spliceai_dir: Optional[str] = self._abspath(spliceai_dir)
         self.no_spliceai: bool = no_spliceai
 
-        self.input_dir: Union[os.PathLike, None] = input_directory
+        self.input_dir: Optional[str] = input_directory
         self.ref_name: Union[str, None] = ref_name
         self.query_name: Union[str, None] = query_name
 
@@ -229,10 +229,10 @@ class TogaMain(CommandLineManager):
 
         self.feature_job_num: int = feature_jobs
         self.orthology_threshold: float = orthology_threshold
-        self.se_model: os.PathLike = single_exon_model
-        self.me_model: os.PathLike = multi_exon_model
+        self.se_model: str = single_exon_model
+        self.me_model: str = multi_exon_model
         self.use_ld_model: bool = use_long_distance_model
-        self.ld_model: os.PathLike = long_distance_model
+        self.ld_model: str = long_distance_model
 
         self.disable_fragment_assembly: bool = disable_fragment_assembly
         self.annotate_ppgenes: bool = annotate_processed_pseudogenes
@@ -372,10 +372,11 @@ class TogaMain(CommandLineManager):
 
         ## directory structure
         ## first-level
-        self.tmp: str = os.path.join(self.output, "tmp")
-        self.meta: str = os.path.join(self.output, "meta")
+        self.tmp: os.PathLike = os.path.join(self.output, "tmp")
+        self.user_tmp: os.PathLike = ""
+        self.meta: os.PathLike = os.path.join(self.output, "meta")
         # self.res: str = os.path.join(self.output, 'results')
-        self.logs: str = os.path.join(self.output, "logs")
+        self.logs: os.PathLike = os.path.join(self.output, "logs")
         self.nextflow_dir: str = os.path.join(self.output, "nextflow")
         self.nextflow_config_dir: str = (
             self.nextflow_dir if nextflow_config_dir is None else nextflow_config_dir
@@ -1507,6 +1508,7 @@ class TogaMain(CommandLineManager):
 
         ## create the first-level directories
         ## (for results, metadata, and temporary files)
+        self.create_tmp_dir()
         self._mkdir(self.tmp)
         self._mkdir(self.meta)
         # self._mkdir(self.res)
@@ -1529,6 +1531,17 @@ class TogaMain(CommandLineManager):
         self._mkdir(self.annot_dir)
         # self._mkdir(self.orthology_results_dir)
         self._mkdir(self.ucsc_dir)
+
+    def create_tmp_dir(self) -> None:
+        """
+        Creates a temporary directory at user's ${TMPDIR} and 
+        creates a symlink to it in the output directory
+        """
+        from tempfile import gettempdir
+        user_tmp: os.PathLike = gettempdir()
+        self.user_tmp: os.PathLike = os.path.join(user_tmp, self.project_id)
+        self._mkdir(self.user_tmp)
+        self._symlink(self.user_tmp, self.tmp)
 
     def check_arguments(self) -> None:
         """
@@ -2012,10 +2025,10 @@ class TogaMain(CommandLineManager):
 
         ## TODO: Rust implementation?
         args: List[str] = [
-            self.cds_bed_hdf5,
+            self.cds_bed_file,
+            # self.cds_bed_hdf5,
             self.u12_file,
             self.u12_hdf5,
-            "--hdf5_input",
             "-ln",
             self.project_id,
         ]
@@ -2378,6 +2391,9 @@ class TogaMain(CommandLineManager):
             self.final_rejection_log,
             "-scm",
             self.spliceai_correction_mode,
+            "-ln",
+            self.project_id,
+            "-v",
         ]
         if self.toga1 and not self.toga1_plus_cesar:
             args.append("-t1")
@@ -2430,6 +2446,8 @@ class TogaMain(CommandLineManager):
                     self.bindings,
                 )
             )
+        if self.debug:
+            args.append("--debug")
         CesarScheduler(args, standalone_mode=False)
 
     def run_alignment_jobs(self) -> None:
