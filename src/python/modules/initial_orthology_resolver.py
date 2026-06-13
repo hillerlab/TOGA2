@@ -657,6 +657,7 @@ class InitialOrthologyResolver(CommandLineManager):
         "rejection_file",
         "jobs2cliques",
         "jobfile",
+        "protein_index",
     )
 
     def __init__(
@@ -824,7 +825,6 @@ class InitialOrthologyResolver(CommandLineManager):
         self.write_resolved_orthologies()
         if self.tree_resolver:
             self.schedule_tree_jobs()
-            # self.write_job_files()
             self.extract_seqs_and_write_jobs()
 
     def check_executables(self) -> None:
@@ -1317,8 +1317,9 @@ class InitialOrthologyResolver(CommandLineManager):
 
     def _load_protein_index(self) -> Dict[str, str]:
         with h5py.File(self.fasta_file, "r") as f:
-            keys = f["keys"][()].tolist()
-            values = f["values"][()].tolist()
+            keys = list(map(lambda x: x.decode("utf"), f["keys"][()]))#.tolist()
+            values = list(map(lambda x: x.decode("utf8"), f["values"][()]))#.tolist()
+        # print(f"{keys[:10]=}")
         return dict(zip(keys, values))
 
     def extract_from_hdf(self, names: List[str]) -> Dict[str, str]:
@@ -1454,7 +1455,7 @@ class InitialOrthologyResolver(CommandLineManager):
                 os.chmod(job_path, file_mode)
                 jl.write(job_path + "\n")
 
-    def pick_representatives(self, clique: List[str], storage: Dict[str, str]) -> List[str]:
+    def pick_representatives(self, clique: List[str]) -> List[str]:
         """ """
         output_list: List[str] = []
         query_genes: List[str] = [x for x in clique if x in self.gene2tr_que]
@@ -1479,7 +1480,7 @@ class InitialOrthologyResolver(CommandLineManager):
                 all_projections.append(proj)
                 loss_status: str = self.loss_status.get(proj, N)
                 seq_id: str = f"{proj}_query"
-                seq: str = storage[seq_id].split("\n")[1].replace("-", "")
+                seq: str = self.protein_index[seq_id].split("\n")[1].replace("-", "")
                 prev_header, prev_seq = gene2longest.get(query_gene, ("", ""))
                 new_is_longer: bool = len(seq) > len(prev_seq)
                 same_length: bool = len(seq) == len(prev_seq)
@@ -1519,7 +1520,7 @@ class InitialOrthologyResolver(CommandLineManager):
                 chain_id: int = int(chain_id.split(",")[0])
                 loss_status: str = self.loss_status.get(proj, N)
                 seq_id: str = f"{proj}_ref"
-                seq: str = storage[seq_id].split("\n")[1].replace("-", "")
+                seq: str = self.protein_index[seq_id].split("\n")[1].replace("-", "")
                 prev_header, prev_seq = ref_gene2longest.get(ref_gene, ("", ""))
                 new_is_longer: bool = len(seq) > len(prev_seq)
                 same_length: bool = len(seq) == len(prev_seq)
@@ -1556,7 +1557,7 @@ class InitialOrthologyResolver(CommandLineManager):
         """
         if not self.jobs2cliques:
             return
-        protein_index: Dict[str, str] = self._load_protein_index()
+        self.protein_index: Dict[str, str] = self._load_protein_index()
         with open(self.jobfile, "w") as jl:
             for j, cliques in self.jobs2cliques.items():
                 job_path: str = os.path.join(self.job_dir, f"batch{j}.ex")
@@ -1565,10 +1566,10 @@ class InitialOrthologyResolver(CommandLineManager):
                 all_fasta_files: List[str] = []
                 for n, c in enumerate(cliques):
                     clique: List[str] = self.cliques_to_resolve[c]
-                    self._to_log(
+                    self._debug(
                         f"Writing FASTA input for clique {c} ({len(clique)} sequences)"
                     )
-                    fasta_seqs: List[str] = self.pick_representatives(clique, protein_index)
+                    fasta_seqs: List[str] = self.pick_representatives(clique)
                     if all(len(x.split("\n")[1]) < 50 for x in fasta_seqs):
                         self._to_log(
                             (
