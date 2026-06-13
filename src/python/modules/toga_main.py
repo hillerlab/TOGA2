@@ -2733,6 +2733,8 @@ class TogaMain(CommandLineManager):
                     self.bindings,
                 )
             )
+        if self.debug:
+            args.append("--debug")
         InitialOrthologyResolver(args, standalone_mode=False)
         add_graph_rej_cmd: str = (
             f"cat {self.rejected_by_graph} >> {self.final_rejection_log}"
