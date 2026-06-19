@@ -49,6 +49,7 @@ CANON: str = "canon"
 NONCANON: str = "nonCanon"
 SEP_DUMMY: str = "n"
 NAME: str = "name"
+GENE_BED_LINE: str = "{chrom}\t{start}\t{end}\t{name}\t1000\t{strand}\n"
 
 TOGA2_ROOT: str = get_upper_dir(__file__, 4)
 DEFAULT_TWOBITTOFA: str = os.path.join(TOGA2_ROOT, "bin", "twoBitToFa")
@@ -66,6 +67,7 @@ BED12TO6_ERR: str = "BED12 to BED6 conversion failed:"
 TRANSCRIPTS: str = "toga.transcripts.bed"
 ISOFORMS: str = "toga.isoforms.tsv"
 U12_FILE: str = "toga.U12introns.bed"
+GENE_BED: str = "toga.genes.bed"
 SLEASY: str = "sleasy.exons.2bit"
 REJ_LOG: str = "rejected_items.tsv"
 EXON_BED6: str = "all_exons.bed6"
@@ -137,6 +139,7 @@ class InputProducer(CommandLineManager):
         "filtered_annotation",
         "filtered_isoforms",
         "sleasy_2bit",
+        "gene_bed",
         "rejection_log",
         "bed6_exons",
         "fasta_for_sleasy",
@@ -159,6 +162,7 @@ class InputProducer(CommandLineManager):
         "profiles",
         "profile_dir",
         "keep_tmp",
+        "tr2coords",
     )
 
     @staticmethod
@@ -302,6 +306,9 @@ class InputProducer(CommandLineManager):
         self.filtered_isoforms: os.PathLike = os.path.join(
             self.output, add_prefix(ISOFORMS, prefix)
         )
+        self.gene_bed: os.PathLike = os.path.join(
+            self.ouput, add_prefix(GENE_BED, prefix)
+        )
         self.sleasy_2bit: os.PathLike = os.path.join(
             self.output, add_prefix(SLEASY, prefix)
         )
@@ -324,6 +331,7 @@ class InputProducer(CommandLineManager):
         self.tr2annot: Dict[str, str] = {}
         self.rejected_transcripts: Set[str] = set()
         self.rejected_lines: List[str] = []
+        self.tr2coords: Dict[str, Tuple[str, int, int, bool]] = {}
 
         self.run()
 
@@ -591,6 +599,7 @@ class InputProducer(CommandLineManager):
                 if flawed:
                     continue
                 self.tr2annot[name] = line
+                self.tr2coords[name] = (data[0], cds_start, cds_end, strand)
         if illegal_name:
             self._to_log(
                 (
@@ -718,13 +727,45 @@ class InputProducer(CommandLineManager):
         rejected_genes: List[str] = []
 
         ## write the remaining isoforms to the output file
-        with open(self.filtered_isoforms, "w") as h:
+        with open(self.filtered_isoforms, "w") as h1, open(self.gene_bed, "w") as h2:
             for gene, trs in gene2trs.items():
                 if not trs:
                     rejected_genes.append(gene)
                     continue
+                chrom: Union[str, None] = None
+                start: Union[int, None] = None
+                end: Union[int, None] = None
+                strand: Union[bool, None] = None
                 for tr in trs:
-                    h.write(f"{gene}\t{tr}\n")
+                    h1.write(f"{gene}\t{tr}\n")
+                    _chrom, _start, _end, _strand = self.tr2coords[tr]
+                    if chrom is None:
+                        chrom = _chrom
+                    elif chrom != _chrom:
+                        self._die(
+                            "Conflicting chromosomes encountered for gene %s: %s and %s"
+                            % (gene, chrom, _chrom)
+                        )
+                    if start is None:
+                        start = _start
+                    else:
+                        start = min(start, _start)
+                    if end is None:
+                        end = _end
+                    else:
+                        end = min(end, _end)
+                    if strand is None:
+                        strand = _strand
+                    else:
+                        self._die("Conflicting strand encountered for gene %s" % gene)
+                gene_bed_line: str = GENE_BED_LINE.format(
+                    chrom=chrom,
+                    start=start,
+                    end=end,
+                    name=gene,
+                    strand=("+" if strand else "-"),
+                )
+                h2.write(gene_bed_line)
 
         ## report genes which ended up having no transcripts
         if rejected_genes:
