@@ -1453,6 +1453,31 @@ to exclude from the filtered annotation. Transcripts located in this contigs
 will be excluded from the annotation. Contigs appearing in both --contigs 
 and --excluded_contigs are treated as excluded.""",
 )
+@input_options.option(
+    "--min_intron_legth",
+    type=str,
+    metavar="INT",
+    default=0,
+    show_default=True,
+    help="""
+Minimal allowed coding sequence intron length; reference transcripts containing intorns shorter 
+than this value are removed from the annotation
+"""
+)
+@input_options.option(
+    "--stringent_nmd_filter",
+    type=str,
+    metavar="FLAG",
+    is_flag=True,
+    default=False,
+    show_default=True,
+    help="""
+If set, nonsense-mediated decay (NMD) candidates are removed from the annotation as long as they suffice the 
+"55-base" rule (distance between CDS end and the first UTR intron exceeds 55 bases).
+Otherwise, coding sequences shorter than 100 bases and transcripts with CDS-UTR intron distance of <80 or >400 bases 
+are ignored by the NMD filter.
+"""
+)
 @control_flow_options.option(
     "--disable_intron_classification",
     "-no_intronic",
@@ -2708,6 +2733,124 @@ def orthogroups(**kwargs) -> None:
     if kwargs.pop("verbose", False):
         _log.setLevel(logging.DEBUG)
     _run(**kwargs)
+
+
+@toga2.command(
+    context_settings=CONTEXT_SETTINGS, 
+    no_args_is_help=True,
+    short_help="Prepare AGORA input from multiple TOGA2 pairwise annotation"
+)
+@mandatory.option(
+    "--input_directory",
+    type=click.Path(exists=True),
+    metavar="INPUT_DIR",
+    required=True,
+    default=None,
+    show_default=True,
+    help="Path to the input TOGA2 directory; see help message header for more details",
+)
+@mandatory.option(
+    "--tree",
+    type=click.Path(exists=True),
+    metavar="TREE",
+    required=True,
+    default=None,
+    show_default=True,
+    help="Path to the input phylogenetic tree in Newick format, see help message header for more details"
+)
+@mandatory.option(
+    "--reference",
+    type=str,
+    metavar="REF_NAME",
+    required=True,
+    default=None,
+    show_default=True,
+    help="""Reference assembly name. The same name must appear in the input directory 
+and in the phylogenetic tree; see help message header for more details 
+"""
+)
+@input_options.option(
+    "--annotation",
+    "-a",
+    type=str,
+    metavar="ANNOT_NAME",
+    default="currentAnnotation",
+    show_default=True,
+    help="""Reference annotation directory name; gene names and coordinates 
+will be fetched from ${INPUT_DIR}/${ANNOT_NAME} contents""",
+)
+@input_options.option(
+    "--min_chrom_size",
+    "-min",
+    type=click.IntRange(min=0, max=None),
+    metavar="INT",
+    default=0,
+    show_default=True,
+    help="Minimal chromosome size to consider"
+)
+@out_options.option(
+    "--output",
+    "-o",
+    type=click.Path(exists=False),
+    default=None,
+    show_default=False,
+    help="Path to the output directory [default: toga2agora_${hex_code}]"
+)
+@verbosity_options.option(
+    "--verbose", "-v", is_flag=True, default=False, help="Control logging verbosity"
+)
+@verbosity_options.option(
+    "--debug",
+    is_flag=True,
+    default=False,
+    show_default=True,
+    help="""Increase logging verbosity by logging debugging messages. 
+Automatically enables \"--verbose\" flag""",
+)
+def toga2agora(**kwargs) -> None:
+    """
+    \b
+    MMP""MM""YMM   .g8""8q.    .g8\"""bgd      db          `7MMF'`7MMF'
+    P'   MM   `7 .dP'    `YM. .dP'     `M     ;MM:           MM    MM
+         MM     dM'      `MM dM'       `     ,V^MM.          MM    MM
+         MM     MM        MM MM             ,M  `MM          MM    MM
+         MM     MM.      ,MP MM.    `7MMF'  AbmmmqMA         MM    MM
+         MM     `Mb.    ,dP' `Mb.     MM   A'     VML        MM    MM
+       .JMML.     `"bmmd"'     `"bmmmdPY .AMA.   .AMMA.    .JMML..JMML.
+
+    \b
+    toga2agora - Prepare AGORA input from multiple TOGA2 pairwise annotation
+    WARNING: This module is currently under development. Alternative input configuration options might be added in the future
+
+    \b
+    Mandatory arguments are:
+    *INPUT_DIR* is the path to the master directory of the following structure:
+        * reference
+            * TOGA2
+                * *ANNOTATION*
+                    * ${REF_NAME}.toga.genes.bed
+                * vs_query1
+                * vs_query2
+                * ...
+                * vs_queryN
+        * query1
+            * chrom.sizes
+        * query2
+            * chrom.sizes
+        * ...
+        * queryN
+            * chrom.sizes
+    *TREE* is a path to the phylogenetic tree in Newick format. All leaves are expected to be named after the reference/query directories in *INPUT_DIR*
+    *REF_NAME* is reference species names; the same name is expected to be used in both the tree and the *INPUT_DIR* structure.
+
+    \b
+    Output directory has the following structure:
+    * `genes` - a directory with ordered gene names lists in AGORA-compatible format (chromosome-start-end-strand-gene);
+    * `orthology_groups` - a directory with ancestral nodes' gene lists;
+    * `AGORA_tree.nwk` - a labeled version of the input tree; each internal node is named after its immediate descendants
+    """
+    from src.python.modules.toga2agora import Toga2Agora
+    Toga2Agora(**kwargs)
 
 
 if __name__ == "__main__":
