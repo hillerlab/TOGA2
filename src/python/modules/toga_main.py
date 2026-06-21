@@ -2508,19 +2508,6 @@ class TogaMain(CommandLineManager):
                     "warning",
                 )
                 self.failed_alignment_batches.append(dir_name)
-                # if dir_name == "batch0":
-                #     quq = os.path.join(dir_path, "log.txt")
-                #     print("PRINTING CESAR LOG")
-                #     print(self._exec(f"tail -n30 {quq}", "MUST NOT FAIL!!"))
-                #     puq = os.path.join(self.nextflow_dir, "cesar_align_TOGA2_3", "cesar_align_TOGA2_3.log")
-                #     print("PRINTING NEXTFLOW CASH")
-                #     print(self._exec(f"tail -n150 {puq}", "MUST NOT FAIL EITHER!!"))
-                #     peq = os.path.join(self.nextflow_dir, ".nextflow.log")
-                #     print("PRINTING NEXTFLOW LOG")
-                #     print(self._exec(f"tail -n150 {peq}", "THIS ALSO SHOULD NOT"))
-                #     print("MANUAL CESAR CONTROL!!!!")
-                #     kek = os.path.join(self.tmp, "cesar_alignment_jobs", "batch0.ex")
-                #     print(self._exec("grep cesar_exec %s | xargs -I{} /bin/bash -c \"{} -v\"" % kek, "CESAR WILL FALL!!"))
             for out_file in Constants.CESAR_OUT_FILES:
                 batch_path: str = os.path.join(dir_path, out_file)
                 out_file_slot: str = Constants.CESAR_FILE_TO_DEST[out_file]
