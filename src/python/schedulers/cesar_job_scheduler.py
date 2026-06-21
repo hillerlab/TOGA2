@@ -471,6 +471,14 @@ def fragmented_projection(chain_id: str) -> bool:
     show_default=True,
     help="Controls the execution verbosity",
 )
+@click.option(
+    "--debug",
+    is_flag=True,
+    default=False,
+    show_default=True,
+    help=""""Increases execution verbosity for debugging purpose; 
+automatically set the --verbose flag on"""
+)
 
 class CesarScheduler(CommandLineManager):
 
@@ -573,9 +581,11 @@ class CesarScheduler(CommandLineManager):
         bindings: Optional[Union[str, None]],
         toga1_compatible: Optional[bool],
         log_name: Optional[str],
-        verbose: bool,
+        verbose: Optional[bool],
+        debug: Optional[bool],
     ) -> None:
         self.v: bool = verbose
+        self.debug: bool = debug
         self.set_logging(name=log_name, toga_module="alignment_scheduler")
 
         self.memory_report: click.File = memory_report
@@ -724,7 +734,10 @@ class CesarScheduler(CommandLineManager):
         Given the path to a CESAR preprocessing report,
         parses the results producing a storage class instances
         """
+        self._debug("Parsing memory report")
         tr2chrom2graph: Dict[str, Dict[str, nx.Graph]] = defaultdict(dict)
+        ## TODO: This part takes humiliatingly long in case of numerous overlapping projections
+        ## (~30 min for fishes with ~300k candidates when --annotate_orthologs is enabled)
         for line in self.memory_report.readlines():
             data: List[str] = line.rstrip().split("\t")
             if not data or not data[0]:
@@ -783,7 +796,9 @@ class CesarScheduler(CommandLineManager):
                     if inter >= max_inter or inter >= _max_inter:
                         tr2chrom2graph[tr][chrom].add_edge(entry, node)
         ## now, resolve the resulting graph
+        self._debug("Assessing search space intersections")
         for tr, chroms in tr2chrom2graph.items():
+            # self._debug("")
             for chrom in chroms:
                 proj_graph: nx.Graph = tr2chrom2graph[tr][chrom]
                 if len(proj_graph.nodes()) == 1:
