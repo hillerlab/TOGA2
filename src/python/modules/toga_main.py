@@ -10,7 +10,7 @@ import sys
 import time
 from collections import defaultdict
 from contextlib import nullcontext
-from shutil import copy, which
+from shutil import copy, copyfileobj, which
 from typing import Any, Dict, List, Optional, Union
 
 from click.utils import LazyFile
@@ -2499,6 +2499,9 @@ class TogaMain(CommandLineManager):
         batch_dirs: List[str] = os.listdir(self.alignment_res_dir)
         if not batch_dirs:
             self._die("All alignment step jobs dies")
+
+        ## pass 1: validate batches and collect existing source paths
+        file_paths: Dict[str, List[str]] = defaultdict(list)
         for dir_name in batch_dirs:
             dir_path: str = os.path.join(self.alignment_res_dir, dir_name)
             ok_file: str = os.path.join(dir_path, Constants.OK_FILE)
@@ -2510,14 +2513,21 @@ class TogaMain(CommandLineManager):
                 self.failed_alignment_batches.append(dir_name)
             for out_file in Constants.CESAR_OUT_FILES:
                 batch_path: str = os.path.join(dir_path, out_file)
-                out_file_slot: str = Constants.CESAR_FILE_TO_DEST[out_file]
-                aggr_path: str = self.__getattribute__(out_file_slot)
-                if not os.path.exists(aggr_path):
-                    self._create_output_stub(out_file_slot)
-                if not os.path.exists(batch_path):
-                    continue
-                cmd: str = f"cat {batch_path} >> {aggr_path}"
-                _ = self._exec(cmd, f"File aggregation failed at file {batch_path}")
+                if os.path.exists(batch_path):
+                    file_paths[out_file].append(batch_path)
+
+        ## pass 2: concatenate all sources for each output file type with Python I/O
+        ## (replaces subprocess-baseed solution from v2.0.8 and earlier)
+        for out_file, paths in file_paths.items():
+            out_file_slot: str = Constants.CESAR_FILE_TO_DEST[out_file]
+            aggr_path: str = self.__getattribute__(out_file_slot)
+            if not os.path.exists(aggr_path):
+                self._create_output_stub(out_file_slot)
+            with open(aggr_path, "ab") as dest:
+                for path in paths:
+                    with open(path, "rb") as src:
+                        copyfileobj(src, dest)
+
         if self.failed_alignment_batches and not self.ignore_crashed_parallel_batches:
             self._write_failed_batches_and_exit("alignment")
 
