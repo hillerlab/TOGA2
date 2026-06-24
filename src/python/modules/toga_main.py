@@ -735,9 +735,6 @@ class TogaMain(CommandLineManager):
         if self.nextflow_exec_script is None:
             self._to_log("Generating a Nextflow execution master script")
             self._generate_nf_script()
-            self._to_log(
-                "Nextflow execution script saved at %s" % self.nextflow_exec_script
-            )
 
         ## if a path to custom Nextflow configuration files was provided,
         ## check the directory completeness
@@ -1849,6 +1846,9 @@ class TogaMain(CommandLineManager):
         self.nextflow_exec_script = nf_file
         with open(nf_file, "w") as h:
             h.write(nf_contents + "\n")
+        self._to_log(
+            "Nextflow execution script saved at %s" % self.nextflow_exec_script
+        )
 
     def _check_nextflow_configs(self) -> None:
         """Checks Nextflow configuration file directory contents"""
