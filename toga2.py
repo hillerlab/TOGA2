@@ -2546,6 +2546,29 @@ def summary(
     config: click.Path,
     config_format: Optional[str] = "tsv",
 ) -> None:
+    """
+    \b
+    MMP""MM""YMM   .g8""8q.     .g8\"""bgd     db          `7MMF'`7MMF'
+    P'   MM   `7 .dP'    `YM. .dP'     `M     ;MM:           MM    MM
+         MM     dM'      `MM dM'       `     ,V^MM.          MM    MM
+         MM     MM        MM MM             ,M  `MM          MM    MM
+         MM     MM.      ,MP MM.    `7MMF'  AbmmmqMA         MM    MM
+         MM     `Mb.    ,dP' `Mb.     MM   A'     VML        MM    MM
+       .JMML.     `"bmmd"'     `"bmmmdPY .AMA.   .AMMA.    .JMML..JMML.
+
+    \b
+    summary - Generate a concise summary of the TOGA2 run
+
+    \b
+    The only mandatory argument is the `--config` option that leads to a TOGA2 project_args_XXX file. 
+    File format can be toggled with `--config_format` option (YAML format by default starting from v2.0.8).
+    \b
+    The following files are expected to be present in the output directory under their default names:\n
+    \t* orthology_scores.tsv
+    \t* loss_summary.tsv
+    \t* query_genes.tsv
+    \t* orthology_classification.tsv
+    """
     from src.python.modules.results_checks import LogParserForSummary, SummaryStat
 
     kwargs: Dict[str, Any] = LogParserForSummary(config, config_format).extract_settings()
