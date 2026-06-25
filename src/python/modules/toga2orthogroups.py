@@ -32,6 +32,16 @@ __github__ = "https://github.com/michelealbertini30"
 # Module-level logger
 log = logging.getLogger(__name__)
 
+# Some TOGA2 orthology_classification.tsv files contain very long fields.
+# Raise the csv field size limit to the largest value the platform allows.
+_csv_limit = sys.maxsize
+while True:
+    try:
+        csv.field_size_limit(_csv_limit)
+        break
+    except OverflowError:
+        _csv_limit //= 2
+
 # QC: FamZ
 _FAMILY_COUNT_Z = 3.0       # |z| threshold for flagging a species in a single family
 _MAX_ZERO_FRAC = 0.5        # skip families where >= this fraction of species have 0 copies
@@ -132,11 +142,10 @@ class UnionFind:
 
 @dataclass
 class ReferenceGeneSet:
-    """Autosomal reference genes and their transcripts.
+    """Reference genes and their transcripts, filtered by a user-supplied blacklist.
 
-    Built from the reference isoforms file after filtering out
-    transcripts on sex chromosomes (chrX, chrY). Only autosomal genes are
-    used downstream to avoid biases from copy-number differences on sex chroms.
+    Transcripts on blacklisted chromosomes/scaffolds are excluded before
+    building orthogroups to avoid copy-number biases.
     """
     genes: set[str]
     transcripts: set[str]
@@ -166,8 +175,6 @@ class Orthogroups:
     families: dict[str, set[str]]
     # Reference gene to family membership
     ref_gene_to_family: dict[str, str]
-    # Full set of autosomal reference genes
-    reference_genes: set[str]
     # ref_gene -> set of "species|query_gene" orthologs (family-level QC)
     ref_gene_orthologs: dict[str, set[str]] = field(default_factory=dict)
 
@@ -176,21 +183,55 @@ class Orthogroups:
 # Main Functions
 # ---------------------------------------------------------------------------
 
+def _parse_species_list(value: str) -> list[str]:
+    """Return an ordered list of species names.
+
+    Accepts either a comma-separated string (e.g. 'human,mouse') or a path to a
+    file with one name per line (tab-separated lines use the first column only).
+    """
+    p = Path(value)
+    if p.is_file():
+        result = []
+        for line in p.read_text().splitlines():
+            sp = line.strip().split("\t")[0]
+            if sp:
+                result.append(sp)
+        return result
+    return [sp.strip() for sp in value.split(",") if sp.strip()]
+
+
+def _parse_blacklist(value: str | None) -> set[str]:
+    """Return a set of chromosome/scaffold names to exclude.
+
+    Accepts either a comma-separated string (e.g. 'chrX,chrY') or a path to a
+    file with one name per line.
+    """
+    if not value:
+        return set()
+    p = Path(value)
+    if p.is_file():
+        return {ln.strip() for ln in p.read_text().splitlines() if ln.strip()}
+    return {name.strip() for name in value.split(",") if name.strip()}
+
+
 def load_reference_genes(
     isoforms_path: str | Path,
     transcripts_bed_path: str | Path,
+    blacklist: set[str] | None = None,
 ) -> ReferenceGeneSet:
-    """Load TOGA isoforms, filter to autosomal transcripts, return gene set.
+    """Load TOGA isoforms, filter out blacklisted chromosomes, return gene set.
 
     Parameters
     ----------
     isoforms_path : path to TOGA isoforms TSV (gene \\t transcript)
     transcripts_bed_path : path to transcript BED (chr in col1, name in col4)
+    blacklist : chromosome/scaffold names to exclude (default: none)
     """
-    # --- Collect autosomal transcript IDs from the BED file ---
-    autosomal_transcripts: set[str] = set()
-    sex_chroms = {"chrX", "chrY"}
-    n_excluded = 0  # counter for sex-chrom transcripts dropped
+    _blacklist = blacklist or set()
+
+    # --- Collect non-blacklisted transcript IDs from the BED file ---
+    kept_transcripts: set[str] = set()
+    n_excluded = 0
 
     with open(transcripts_bed_path) as fh:
         for line in fh:
@@ -198,17 +239,17 @@ def load_reference_genes(
                 continue
             parts = line.split("\t", 5)
             chrom, name = parts[0], parts[3]
-            if chrom in sex_chroms:
+            if chrom in _blacklist:
                 n_excluded += 1
             else:
-                autosomal_transcripts.add(name)
+                kept_transcripts.add(name)
 
     log.info(
-        "Transcripts BED: %d autosomal, %d chrX/Y excluded",
-        len(autosomal_transcripts), n_excluded,
+        "Transcripts BED: %d kept, %d excluded (%s)",
+        len(kept_transcripts), n_excluded, ", ".join(sorted(_blacklist)) or "none",
     )
 
-    # --- Read isoforms TSV, keep only entries with at least one autosomal transcript---
+    # --- Read isoforms TSV, keep only entries with at least one non-blacklisted transcript ---
     genes: set[str] = set()
     gene_to_tx: dict[str, list[str]] = defaultdict(list)
     n_iso_total = 0
@@ -222,19 +263,19 @@ def load_reference_genes(
                 continue
             n_iso_total += 1
             gene, transcript = row[0], row[1]
-            if transcript in autosomal_transcripts:
+            if transcript in kept_transcripts:
                 n_iso_kept += 1
                 genes.add(gene)
                 gene_to_tx[gene].append(transcript)
 
     log.info(
-        "TOGA isoforms: %d total, %d kept (autosomal), %d genes",
+        "TOGA isoforms: %d total, %d kept, %d genes",
         n_iso_total, n_iso_kept, len(genes),
     )
 
     return ReferenceGeneSet(
         genes=genes,
-        transcripts=autosomal_transcripts,
+        transcripts=kept_transcripts,
         gene_to_transcripts=dict(gene_to_tx),
     )
 
@@ -381,9 +422,6 @@ def build_orthogroups(
     ref_gene_to_family: dict[str, str] = {}
 
     for _root, members in components.items():
-        if not members:
-            continue
-
         # Family ID: use PANTHER ID when available (PANTHER mode)
         if gene_to_panther:
             panther_ids = {gene_to_panther[m] for m in members if m in gene_to_panther}
@@ -410,7 +448,6 @@ def build_orthogroups(
     return Orthogroups(
         families=families,
         ref_gene_to_family=ref_gene_to_family,
-        reference_genes=ref_genes.genes,
         ref_gene_orthologs=dict(ref_gene_orthologs),
     )
 
@@ -484,10 +521,10 @@ def generate_count_table(
     """Build the copy-number count table.
 
     CAFE5 expects a tab-separated file where:
-      - Header: [Family ID, species1, species2, ...]
-      - Rows: Family ID and copy number of that gene family in each species.
+      - Header: [Desc, Family ID, species1, species2, ...]
+      - Rows: NA, Family ID, and copy number of that gene family in each species.
     """
-    header = ["Family ID"] + species_list
+    header = ["Desc", "Family ID"] + species_list
     rows = []
 
     # Iterate over families in sorted order so the output is deterministic
@@ -502,9 +539,19 @@ def generate_count_table(
                 if sp in counts:
                     counts[sp] += 1
 
-        rows.append([family_id] + [counts[sp] for sp in species_list])
+        rows.append(["NA", family_id] + [counts[sp] for sp in species_list])
 
     return header, rows
+
+
+def apply_size_filter(rows: list[list], threshold: int) -> tuple[list[list], int]:
+    """Drop families where any species has >= threshold gene copies.
+
+    Row format expected: [Desc, family_id, count1, count2, ...]
+    Returns (filtered_rows, n_removed).
+    """
+    filtered = [row for row in rows if all(c < threshold for c in row[2:])]
+    return filtered, len(rows) - len(filtered)
 
 
 def write_count_table(
@@ -552,7 +599,7 @@ def species_qc_diagnostics(
     OrthoZ — spanning-rate signal:
         SumZ = Sum of per family sum(n_refs_spanned - 1) / total queries per species z-scores.
         OrthoZ = Z-score of SumZ across species.
-        
+
         Family filtering:
         - Skipped if fewer than max(3, min(n//3, 10)) species have genes, or var==0.
 
@@ -560,7 +607,7 @@ def species_qc_diagnostics(
         Per family, z-score raw copy counts across all species.
         Count families where a species is a count outlier (|z| > _FAMILY_COUNT_Z).
         Z-score those counts across species → FamZ.
-        
+
         Family filtering:
         - Skipped if fewer than 50% of species have genes or var==0
 
@@ -717,11 +764,11 @@ def species_qc_diagnostics(
 
     # --- Formatted report to stderr ---
     output.write("\n=== Species QC Diagnostics ===\n")
-    output.write(f"  span-z threshold: {ortho_z}\n")
+    output.write(f"  ortho-z threshold: {ortho_z}\n")
     output.write(f"  fam-z threshold:  {fam_z}\n")
     output.write(f"  one-to-one orthologs: {n_one2one}\n")
     output.write(f"  total families: {n_families}\n")
-    output.write(f"  scored families (spanning): {n_scoreable_span}\n")
+    output.write(f"  scored families (OrthoZ): {n_scoreable_span}\n")
     output.write(
         f"  {'Species':<25} {'FlagFam':>12} {'FamZ':>8} {'OrthoZ':>8} {'Flag':>6}\n"
     )
@@ -790,8 +837,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     req.add_argument(
         "-s", "--species-list",
         required=True,
-        metavar="FILE",
-        help="Newline separated list of species",
+        metavar="LIST|FILE",
+        help="Comma-separated species names or path to a file with one name per line",
     )
     req.add_argument(
         "-b", "--transcripts-bed",
@@ -829,15 +876,30 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Include UL (Uncertain Loss) transcripts",
     )
     opt.add_argument(
-        "--one-to-one",
-        action="store_true",
-        help="Only write list of one-to-one orthologs",
+        "-sf", "--size-filter",
+        type=int,
+        metavar="INT",
+        default=None,
+        help="Remove gene families where any species has >= INT gene copies",
+    )
+    opt.add_argument(
+        "-bl", "--blacklist",
+        metavar="LIST|FILE",
+        default=None,
+        help=(
+            "Comma-separated chr/scaffold names or path to a file with one name per line"
+        ),
     )
     opt.add_argument(
         "--panther",
         metavar="FILE",
         default=None,
         help="PANTHER database flat file; if provided, enables PANTHER-guided family merging",
+    )
+    opt.add_argument(
+        "--one-to-one",
+        action="store_true",
+        help="Per-reference gene matrix with query gene name if single-copy",
     )
 
     qc = app.add_argument_group("QC")
@@ -881,11 +943,13 @@ def run(
     out_dir: str,
     force: bool = False,
     include_ul: bool = False,
+    blacklist: str | None = None,
     panther: str | None = None,
     ortho_z: float = 3.0,
     fam_z: float = 3.0,
     no_qc: bool = False,
     one_to_one: bool = False,
+    size_filter: int | None = None,
 ) -> None:
     """Core runner — called by both the argparse main() and the Click subcommand.
 
@@ -897,40 +961,73 @@ def run(
 
     # --- Resolve output directory and expected file paths ---
     _out_dir = Path(out_dir)
-
-    # Create output directory if it doesn't exist.
     _out_dir.mkdir(parents=True, exist_ok=True)
 
-    if not one_to_one:
-        out_tsv = _out_dir / "orthogroups_matrix.tsv"
-        out_map = _out_dir / "orthogroups_map.tsv"
+    out_matrix = _out_dir / "one2one_matrix.tsv"
+    out_tsv    = _out_dir / "orthogroups_matrix.tsv"
+    out_map    = _out_dir / "orthogroups_map.tsv"
 
-        # Check for existing output files unless --force is set.
-        if not force:
+    if not force:
+        if one_to_one:
+            if out_matrix.exists():
+                log.error("Output file already exists: %s\nUse -f / --force to overwrite.", out_matrix)
+                sys.exit(1)
+        else:
             existing = [f for f in (out_tsv, out_map) if f.exists()]
             if existing:
                 log.error(
-                    "Output file(s) already exist: %s\n"
-                    "Use -f / --force to overwrite.",
+                    "Output file(s) already exist: %s\nUse -f / --force to overwrite.",
                     ", ".join(str(f) for f in existing),
                 )
                 sys.exit(1)
 
     # --- Load species list ---
-    # One species name per line; tab-separated lines are also accepted
-    species_list: list[str] = []
-    with open(species_list_path) as fh:
-        for line in fh:
-            sp = line.strip().split("\t")[0]
-            if sp:
-                species_list.append(sp)
+    species_list = _parse_species_list(species_list_path)
     log.info("Species: %d loaded", len(species_list))
 
     # --- Load reference gene set ---
-    ref_genes = load_reference_genes(isoforms, transcripts_bed)
+    ref_genes = load_reference_genes(isoforms, transcripts_bed, blacklist=_parse_blacklist(blacklist))
+
+    # --- One-to-one mode: per-reference-gene matrix, bypasses Union-Find ---
+    if one_to_one:
+        if panther:
+            log.warning("--panther is ignored in --one-to-one mode")
+        if size_filter is not None:
+            log.warning("--size-filter is ignored in --one-to-one mode")
+
+        # Collect raw per-(ref_gene, species) individual query gene sets.
+        per_gene: dict[str, dict[str, set[str]]] = {rg: {} for rg in ref_genes.genes}
+        for spe in species_list:
+            log.debug("Processing species: %s", spe)
+            sp_ortho = load_species_orthologs(spe, toga_dir, ref_genes.genes, include_ul=include_ul)
+            for rg, q_genes in sp_ortho.ref_to_query.items():
+                # q_gene strings may be comma-separated lists (many2many rows);
+                # split to collect distinct individual query gene loci.
+                per_gene[rg][spe] = {g for qg in q_genes for g in qg.split(",")}
+
+        header = ["Ref_ID"] + species_list
+        rows = []
+        for rg in sorted(per_gene):
+            sp_genes = per_gene[rg]
+            n_ones = sum(1 for sp in species_list if len(sp_genes.get(sp, set())) == 1)
+            if n_ones < 2:
+                continue
+            row: list = [rg]
+            for sp in species_list:
+                genes = sp_genes.get(sp, set())
+                row.append(next(iter(genes)) if len(genes) == 1 else "-")
+            rows.append(row)
+
+        with open(out_matrix, "w", newline="") as fh:
+            writer = csv.writer(fh, delimiter="\t")
+            writer.writerow(header)
+            writer.writerows(rows)
+        log.info("Wrote one2one matrix: %s (%d genes)", out_matrix, len(rows))
+        _log_elapsed(t0)
+        return
 
     # --- Build orthogroups ---
-    if panther and not one_to_one:
+    if panther:
         log.info("Running in PANTHER mode...")
         orthogroups = build_orthogroups(
             ref_genes, species_list, toga_dir,
@@ -944,37 +1041,14 @@ def run(
             include_ul=include_ul,
         )
 
-    # --- One-to-one mode: alternative output only ---
-    if one_to_one:
-        out_lst = _out_dir / "one2one.lst"
-        if not force and out_lst.exists():
-            log.error("Output file already exists: %s\nUse -f / --force to overwrite.", out_lst)
-            sys.exit(1)
-
-        # Build family_id -> [ref_genes] from the inverse mapping.
-        family_to_refs: dict[str, list[str]] = defaultdict(list)
-        for rg, fid in orthogroups.ref_gene_to_family.items():
-            family_to_refs[fid].append(rg)
-
-        one2one_genes: list[str] = []
-        for fid, members in orthogroups.families.items():
-            sp_counts: dict[str, int] = defaultdict(int)
-            for m in members:
-                if "|" in m:
-                    sp, _ = m.split("|", 1)
-                    sp_counts[sp] += 1
-            if all(sp_counts.get(sp, 0) == 1 for sp in species_list):
-                one2one_genes.extend(family_to_refs.get(fid, []))
-
-        one2one_genes.sort()
-        with open(out_lst, "w") as fh:
-            for g in one2one_genes:
-                fh.write(g + "\n")
-        log.info("Wrote one-to-one list: %s (%d genes)", out_lst, len(one2one_genes))
-        _log_elapsed(t0)
-        return
-
     header, rows = generate_count_table(orthogroups, species_list)
+
+    if size_filter is not None:
+        rows, n_removed = apply_size_filter(rows, size_filter)
+        log.info("Size filter (threshold=%d): %d families removed, %d kept", size_filter, n_removed, len(rows))
+        kept_ids = {row[1] for row in rows}
+        orthogroups.families = {fid: m for fid, m in orthogroups.families.items() if fid in kept_ids}
+
     write_count_table(header, rows, out_tsv)
     write_orthogroup_membership(orthogroups, out_map)
 
@@ -1004,11 +1078,13 @@ def main(argv: list[str] | None = None) -> None:
         out_dir=args.out_dir,
         force=args.force,
         include_ul=args.include_ul,
+        blacklist=args.blacklist,
         panther=args.panther,
         ortho_z=args.ortho_z,
         fam_z=args.fam_z,
         no_qc=args.no_qc,
         one_to_one=args.one_to_one,
+        size_filter=args.size_filter,
     )
 
 
