@@ -100,7 +100,7 @@ jobs:
         
         cd postoga/rustools
         python3 -m pip install maturin
-        maturin develop --release -i python
+        maturin develop --release -- -i python
         cd ../..
         
         ./postoga/postoga.py -h
