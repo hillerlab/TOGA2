@@ -2578,11 +2578,11 @@ def test(output: Optional[click.Path]) -> None:
     "--species_list",
     "-s",
     "species_list_path",
-    type=click.Path(exists=True),
-    metavar="FILE",
+    type=str,
+    metavar="LIST|FILE",
     cls=DependentOption,
     required=True,
-    help="Newline-separated list of species names",
+    help="Comma-separated species names or path to a file with one name per line",
 )
 @mandatory.option(
     "--transcripts_bed",
@@ -2591,7 +2591,7 @@ def test(output: Optional[click.Path]) -> None:
     metavar="FILE",
     cls=DependentOption,
     required=True,
-    help="Reference transcript BED file (used to filter out sex-chromosome transcripts)",
+    help="Reference transcript BED file",
 )
 @mandatory.option(
     "--isoforms",
@@ -2632,7 +2632,25 @@ def test(output: Optional[click.Path]) -> None:
     is_flag=True,
     default=False,
     show_default=True,
-    help="Only write list of one-to-one orthologs",
+    help="Write per-reference-gene matrix with query gene name if single-copy (one2one_matrix.tsv)",
+)
+@misc_options.option(
+    "--blacklist",
+    "-bl",
+    type=str,
+    metavar="LIST|FILE",
+    default=None,
+    show_default=True,
+    help="Comma-separated chr/scaffold names to exclude, or path to a file with one name per line",
+)
+@misc_options.option(
+    "--size_filter",
+    "-sf",
+    type=int,
+    metavar="INT",
+    default=None,
+    show_default=True,
+    help="Remove gene families where any species has >= INT gene copies",
 )
 @misc_options.option(
     "--include_ul",
@@ -2696,7 +2714,7 @@ def orthogroups(**kwargs) -> None:
     Output files (written to --output directory):
       orthogroups_matrix.tsv  — copy-number count table (CAFE5-compatible)
       orthogroups_map.tsv     — full orthogroup membership per family
-      one2one.lst             - list of one-to-one orthologs across all species (optional)
+      one2one_matrix.tsv      — per-ref-gene matrix with single-copy query gene names (optional)
     """
     from src.python.modules.toga2orthogroups import run as _run
 
