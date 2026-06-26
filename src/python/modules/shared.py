@@ -14,10 +14,22 @@ import time
 from datetime import datetime
 from logging import Formatter
 from shutil import copy2, move, rmtree
-from typing import Any, Dict, Iterable, List, Optional, Set, TextIO, Tuple, Union
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    Iterable,
+    List,
+    Optional,
+    Set,
+    TextIO,
+    Tuple,
+    Union,
+)
 
 import click
 import click_option_group
+import gzip
 import networkx as nx
 from click_option_group import OptionGroup
 
@@ -71,6 +83,7 @@ class DependentOption(click_option_group.GroupedOption):
     An expansion of the original GroupedOption class with mutex and dependency functionlities.
     Mutex functionality is based on the solution from https://github.com/pallets/click/issues/257
     """
+
     def __init__(self, *args, **kwargs) -> None:
         ## mutex functionality: deprecate the joint use of mutually exclusive options
         self.competes_with: Union[List[str], None] = kwargs.pop("competes_with", None)
@@ -78,27 +91,27 @@ class DependentOption(click_option_group.GroupedOption):
         ## dependence functionality: enforce the use of the option in tandem with its dependencies
         self.requires: Union[List[str], None] = kwargs.pop("requires", None)
         ## 'soft dependence' functionality: enforce the use of the option unless alternative is provided
-        self.not_required_if: Union[List[str], None] = kwargs.pop("not_required_if", None)
+        self.not_required_if: Union[List[str], None] = kwargs.pop(
+            "not_required_if", None
+        )
         # if kwargs["help"] and self.competes_with is not None:
         if self.competes_with or self.not_required_if or self.requires:
             kwargs["help"] = "" if not kwargs["help"] else kwargs["help"] + ". "
             if self.competes_with is not None:
                 kwargs["help"] += (
-                    "Mutually exclusive with the following options: " + 
-                    ", ".join(self.competes_with) + 
-                    ". "
+                    "Mutually exclusive with the following options: "
+                    + ", ".join(self.competes_with)
+                    + ". "
                 )
             if self.requires is not None:
                 kwargs["help"] += (
-                    "Requires the following options: " + 
-                    ", ".join(self.requires) + 
-                    ". "
+                    "Requires the following options: " + ", ".join(self.requires) + ". "
                 )
             if self.not_required_if is not None:
                 kwargs["help"] += (
-                    "Not required if the following options are provided: " + 
-                    ", ".join(self.not_required_if) + 
-                    ". "
+                    "Not required if the following options are provided: "
+                    + ", ".join(self.not_required_if)
+                    + ". "
                 )
         super(DependentOption, self).__init__(*args, **kwargs)
 
@@ -137,6 +150,7 @@ class DependentOption(click_option_group.GroupedOption):
             )
         return super(DependentOption, self).handle_parse_result(ctx, opts, args)
 
+
 # class MutexOption(click_option_group.GroupedOption):
 #     """
 #     Mutually exclusive Click option class.
@@ -165,9 +179,9 @@ class DependentOption(click_option_group.GroupedOption):
 #             kwargs.pop("not_required_if") if "not_required_if" in kwargs else None
 #         )
 #         kwargs["help"] = (
-#             "" if kwargs.get("help") is None else (kwargs.get("help", "") + ". ") + 
-#             "Mutually exclusive with the following options: " + 
-#             ", ".join(self.competes_with) + 
+#             "" if kwargs.get("help") is None else (kwargs.get("help", "") + ". ") +
+#             "Mutually exclusive with the following options: " +
+#             ", ".join(self.competes_with) +
 #             "."
 #         )
 #         super(MutexOption, self).__init__(*args, **kwargs)
@@ -201,7 +215,7 @@ class DependentOption(click_option_group.GroupedOption):
 
 # class DependentOption(click_option_group.GroupedOption):
 #     """
-#     A grouped option that requires one or more other options for the client to start. 
+#     A grouped option that requires one or more other options for the client to start.
 #     A rework of the MutexClass above.
 #     """
 #     def __init__(self, *args, **kwargs) -> None:
@@ -220,9 +234,9 @@ class DependentOption(click_option_group.GroupedOption):
 #                 % kwargs["name"]
 #             )
 #         kwargs["help"] = (
-#             "" if kwargs.get("help") is None else (kwargs.get("help", "") + ". ") + 
-#             "Requires the following options: " + 
-#             ", ".join(self.requires) + 
+#             "" if kwargs.get("help") is None else (kwargs.get("help", "") + ". ") +
+#             "Requires the following options: " +
+#             ", ".join(self.requires) +
 #             "."
 #         )
 #         super(DependentOption, self).__init__(*args, **kwargs)
@@ -237,11 +251,12 @@ class DependentOption(click_option_group.GroupedOption):
 #                     )
 #         return super(MutexOption, self).handle_parse_result(ctx, opts, args)
 
+
 class TogaDirConfig:
     ## NOTE: Slots are currently deprecated due to Postoga using vars() when logging starting args
     ## TO be changed after the respective change is pushed to Postoga
     # __slots__ = (
-    #     "togadir", 
+    #     "togadir",
     #     "orthology_class",
     #     "loss_status",
     #     "orthology_score",
@@ -610,7 +625,10 @@ def parse_one_column(file: Union[str, TextIO]) -> List[str]:
 def read_tab(file: str) -> Iterable[str]:
     """Read a TSV file line by line, yield a generator of field-split lines"""
     if type(file) is str:
-        with open(file, "r") as h:
+        opener: Callable[str] = (
+            gzip.open if (file.endswith(".gz") or file.endswith("gzip")) else open
+        )
+        with opener(file, "r") as h:
             for line in h:
                 data: List[str] = line.strip().split("\t")
                 if not data or not data[0]:
@@ -715,7 +733,9 @@ class CommandLineManager:
             toga_module = "unknown_module"
         self.logger: logging.Logger = logging.getLogger(name)
         if self.logger.handlers:
-            self.logger = logging.LoggerAdapter(self.logger, {"toga_module": toga_module})
+            self.logger = logging.LoggerAdapter(
+                self.logger, {"toga_module": toga_module}
+            )
             return
         if hasattr(self, "debug") and self.debug:
             self.logger.setLevel(logging.DEBUG)
@@ -754,7 +774,7 @@ class CommandLineManager:
             msg: A message to report in the log channel/file
 
         Raises:
-            Returns without logging anything if `debug` attribute does not exist 
+            Returns without logging anything if `debug` attribute does not exist
         or is set to False or if `logger` attribute does not exist
         """
         if not hasattr(self, "debug") or not self.debug:
@@ -859,7 +879,7 @@ class CommandLineManager:
             for line in pr.stdout:
                 if not line:
                     continue
-                self._echo(line) ##what was this supposed to mean?
+                self._echo(line)  ##what was this supposed to mean?
         stdout, stderr = pr.communicate(input=input_)
         rc: int = pr.returncode
         if rc != 0:
