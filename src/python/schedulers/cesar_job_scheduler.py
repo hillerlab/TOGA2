@@ -57,7 +57,7 @@ FIRST_ACCEPTOR: str = os.path.join(TOGA2_ROOT, *FIRST_ACCEPTOR)
 LAST_DONOR: str = os.path.join(TOGA2_ROOT, *LAST_DONOR)
 
 OK: str = ".ok"
-TOUCH: str = "touch {}"
+TOUCH: str = "touch {file}"
 
 @dataclass
 class ProjectionMeta:
@@ -1143,7 +1143,7 @@ class CesarScheduler(CommandLineManager):
                     ok_file: str = os.path.join(
                         self.cesar_output_directory, f"batch{jobid}", OK
                     )
-                    h2.write(TOUCH.format(ok_file) + "\n")
+                    h2.write(TOUCH.format(file=ok_file) + "\n")
                 ## make the partition files executable
                 file_mode: bytes = os.stat(jobfile_dest).st_mode
                 file_mode |= (file_mode & 0o444) >> 2
