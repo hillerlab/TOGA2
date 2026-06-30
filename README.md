@@ -61,9 +61,7 @@ Detailed explanations of all output files can be found in our
 * Companion dataset:
     * Adding input annotation for two turtle (*Emydura macquarii macquarii*, *Emys orbicularis*) and five percomoprh fishes (*Gasterosteus aculeatus*, *Hippoglossus stenolepis*, *Melanotaenia boesemani*, *Nothobranchius furzeri*, *Synchiropus splendidus*) reference species.
 
-For the full list of code changes, see [changelog.md](https://github.com/hillerlab/TOGA2/blob/main/changelog.md) .
-
----
+For the full list of code changes, see [changelog.md](https://github.com/hillerlab/TOGA2/blob/main/assets/changelog/changelog.md) .
 
 ## Installation
 
