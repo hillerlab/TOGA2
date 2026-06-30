@@ -16,6 +16,8 @@ class Gxf:
     GTF: str = "gtf"
     GFF3: str = "gff"
     GFX: Tuple[str, str] = (GTF, GFF3)
+    BED: str = "bed"
+    ANNOT_FORMAT: str = (BED, GTF, GFF3)
     BIOTYPES: Tuple[str, ...] = ("biotype", "gene_biotype", "transcript_biotype",)
     GENE_ID: str = "gene_id"
     TR_ID: str = "transcript_id"
@@ -97,10 +99,9 @@ def parse_gxf_attrs(attrs: str, gff3: bool = False) -> Dict[str, str]:
         dictionary {attribute_name: attribute_value}
     """
     sep: str = "=" if gff3 else " "
-    split_attrs: List[str] = attrs.strip().split(";")
-    split_attrs: List[Tuple[str, str]] = list(
-        map(lambda x: x.strip("\" ").split(sep), split_attrs)
-    )
-    if any(len(x) != 2 for x in split_attrs):
-        pass ## die/raise Exception
-    return {x[0]: x[1] for x in split_attrs}
+    pairs: List[List[str]] = [
+        x.strip().split(sep, 1)
+        for x in attrs.strip().split(";")
+        if x.strip()
+    ]
+    return {x[0].strip(): x[1].strip().strip('"') for x in pairs if len(x) == 2}
