@@ -23,7 +23,7 @@ __credits__ = "Bogdan M. Kirilenko"
 __all__ = None
 
 ALLOWED_CHARSET: Tuple[int, ...] = tuple(
-    [35, 45, 46, *range(48, 59), *range(65, 91), 95, *range(97, 123), 124]
+    [35, *range(45, 59), *range(65, 91), 95, *range(97, 123), 124]
 )
 
 

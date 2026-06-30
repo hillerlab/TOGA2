@@ -20,12 +20,14 @@ from typing import Dict, ContextManager, List, Optional, Set, TextIO, Tuple, Uni
 import click
 import networkx as nx
 
+from .cesar_wrapper_constants import CLASS_TO_NUM
 from .cesar_wrapper_executables import AnnotationEntry, Exon, ExonDict
 from .constants import RejectionReasons
 from .shared import (
     CONTEXT_SETTINGS,
     CommandLineManager,
     base_proj_name,
+    get_connected_components,
     get_proj2trans,
     intersection,
     segment_base,
@@ -50,7 +52,10 @@ EXTENDED_HIGH_CONFIDENCE: Tuple[str, str] = (
     "FI",
     "I",
 )  ## NOTE: Previously ('FI', 'PI') => likely a bug
+PARALOG_HIGH_CONFIDENCE: Tuple[str, str] = ("FI", "I", "PI",)
+PG: str = "PG"
 MIN_RELIABLE_EXON_COV: float = 0.6
+MAX_PARALOGS_WITH_ORTH: int = 5 ## TODO: Ideally should be a variable parameter
 
 
 def parse_single_column(file: Union[TextIO, None]) -> Set[str]:
@@ -79,6 +84,18 @@ class Coords:
     start: int
     end: int
     strand: bool
+
+    def length(self) -> int:
+        """
+        Returns interval length
+
+        Args:
+            None
+
+        Returns:
+            int - interval length
+        """
+        return self.end - self.start
 
 
 @click.command(context_settings=CONTEXT_SETTINGS, no_args_is_help=True)
@@ -315,6 +332,7 @@ class QueryGeneCollapser(CommandLineManager):
         "orthology_threshold",
         "paralog_list",
         "proc_pseudogene_list",
+        "has_orthologs",
         "discarded_paralogs",
         "discarded_paralogs_file",
         "discarded_ppgenes",
@@ -414,6 +432,8 @@ class QueryGeneCollapser(CommandLineManager):
         self.proc_pseudogene_list: Set[str] = parse_single_column(
             processed_pseudogene_list
         )
+        self.has_orthologs: Set[str] = set()
+        self.get_transcripts_with_orthologs()
 
         self.proj2status: Dict[str, str] = {}
         # self.parse_loss_file(loss_summary_file)
@@ -535,7 +555,9 @@ class QueryGeneCollapser(CommandLineManager):
             self.query_transcripts[chrom][proj] = Coords(
                 proj, chrom, cds_start, cds_end, strand
             )
-            self.tr2chrom[proj] = (*self.tr2chrom.get(proj, ()), chrom)
+            found_chroms: Tuple[str, ...] = self.tr2chrom.get(proj, tuple())
+            if chrom not in found_chroms:
+                self.tr2chrom[proj] = (*found_chroms, chrom)
             ## do not save the exon coordinates for exons not supported by the chain
             gap_supported: bool = data[-3] == "CHAIN_SUPPORTED"
             if not gap_supported:
@@ -659,6 +681,24 @@ class QueryGeneCollapser(CommandLineManager):
             self.proj2prob[proj] = prob
             self.tr2max_prob[tr] = max(prob, self.tr2max_prob.get(tr, 0.0))
 
+    def get_transcripts_with_orthologs(self) -> None:
+        """
+        Retrieves reference transcripts that have orthologous projections.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        for projection in self.tr2exons.keys():
+            if projection in self.paralog_list:
+                continue
+            if projection in self.proc_pseudogene_list:
+                continue
+            tr: str = get_proj2trans(projection)[0]
+            self.has_orthologs.add(tr)
+
     def _overextended_projection(self, proj: str) -> bool:
         """
         Estimates whether projection is an overextended unreliable ortholog if:
@@ -766,6 +806,12 @@ class QueryGeneCollapser(CommandLineManager):
                     proj_out.name in self.paralog_list
                     or basename_out in self.paralog_list
                 )
+                if out_is_paralog:
+                    out_transcript: str = get_proj2trans(basename_out)[0]
+                    if out_transcript in self.has_orthologs and self.proj2status[basename_out] == PG:
+                    # if out_transcript in self.has_orthologs and self.proj2status[basename_out] not in PARALOG_HIGH_CONFIDENCE:
+                        self.discarded_paralogs.add(basename_out)
+                        continue
                 out_is_pseudo: bool = (
                     proj_out.name in self.proc_pseudogene_list
                     or basename_out in self.proc_pseudogene_list
@@ -820,6 +866,12 @@ class QueryGeneCollapser(CommandLineManager):
                         proj_in.name in self.paralog_list
                         or basename_in in self.paralog_list
                     )
+                    if in_is_paralog:
+                        in_transcript: str = get_proj2trans(basename_in)[0]
+                        if in_transcript in self.has_orthologs and self.proj2status[basename_in] == PG:
+                        # if in_transcript in self.has_orthologs and self.proj2status[basename_in] not in PARALOG_HIGH_CONFIDENCE:
+                            self.discarded_paralogs.add(basename_in)
+                            continue
                     in_is_pseudo: bool = (
                         proj_in.name in self.proc_pseudogene_list
                         or basename_in in self.proc_pseudogene_list
@@ -928,10 +980,11 @@ class QueryGeneCollapser(CommandLineManager):
                         graph.add_edge(_out, _in)
 
         ## extract the connected components
-        if NX_VERSION < 2.4:
-            raw_components = list(nx.connected_component_subgraphs(graph))
-        else:
-            raw_components = [graph.subgraph(c) for c in nx.connected_components(graph)]
+        raw_components: List[nx.Graph] = get_connected_components(graph)
+        # if NX_VERSION < 2.4:
+        #     raw_components = list(nx.connected_component_subgraphs(graph))
+        # else:
+        #     raw_components = [graph.subgraph(c) for c in nx.connected_components(graph)]
 
         ## for each component, estimate their coordinates in the query
         coords_for_sorting: Dict[int, Tuple[str, int]] = {}
@@ -949,8 +1002,39 @@ class QueryGeneCollapser(CommandLineManager):
             starts: Dict[str, int] = {}
             stops: Dict[str, int] = {}
             strands: Dict[str, bool] = {}
+            # paralog locus filtering if --annotate_paralogs is set
+            if all(x in self.paralog_list for x in c.nodes()):
+                have_orthologs: List[str] = [
+                    x for x in c.nodes() if get_proj2trans(x)[0] in self.has_orthologs
+                ]
+                if not have_orthologs:
+                    c = [list(c.nodes())]
+                else:
+                    have_orthologs.sort(
+                        key=lambda x: (
+                            CLASS_TO_NUM[self.proj2status[x]],
+                            self.query_transcripts[self.tr2chrom[x][0]][x].length()
+                        ),
+                        reverse=True
+                    )
+                    paralogs_to_remove: List[str] = have_orthologs[MAX_PARALOGS_WITH_ORTH:]
+                    if not paralogs_to_remove:
+                        c = [list(c.nodes())]
+                    else:
+                        self.discarded_paralogs.update(paralogs_to_remove)
+                        c.remove_nodes_from(paralogs_to_remove)
+                        # if NX_VERSION < 2.4:
+                        #     clean_components: List[nx.Graph] = list(
+                        #         nx.connected_component_subgraphs(c)
+                        #     )
+                        # else:
+                        #     clean_components: List[nx.Graph] = [
+                        #         graph.subgraph(c) for c in nx.connected_components(c)
+                        #     ]
+                        paralogous_components: List[nx.Graph] = get_connected_components(c)
+                        c: List[List[str]] = [list(x.nodes()) for x in paralogous_components]
             ## extended (=insufficiently covered) projection filter
-            if self.proj2exon_cov:
+            elif self.proj2exon_cov:
                 # sufficiently_covered: List[str] = [
                 #     x for x in c if self.proj2exon_cov.get(x, MIN_RELIABLE_EXON_COV) >= MIN_RELIABLE_EXON_COV
                 # ]
@@ -1016,15 +1100,16 @@ class QueryGeneCollapser(CommandLineManager):
                                     alt_projs: List[str] = gene2alt_form[alt_gene]
                                     disjointed: nx.Graph = c.copy()
                                     disjointed.remove_nodes_from(alt_projs)
-                                    if NX_VERSION < 2.4:
-                                        disjointed_components = list(
-                                            nx.connected_component_subgraphs(disjointed)
-                                        )
-                                    else:
-                                        disjointed_components = [
-                                            graph.subgraph(c)
-                                            for c in nx.connected_components(disjointed)
-                                        ]
+                                    # if NX_VERSION < 2.4:
+                                    #     disjointed_components = list(
+                                    #         nx.connected_component_subgraphs(disjointed)
+                                    #     )
+                                    # else:
+                                    #     disjointed_components = [
+                                    #         graph.subgraph(c)
+                                    #         for c in nx.connected_components(disjointed)
+                                    #     ]
+                                    disjointed_components: List[nx.Graph] = get_connected_components(disjointed)
                                     ## if the overall number of components did not change,
                                     ## the alternative isoforms are let in
                                     if len(disjointed_components) == 1:
@@ -1042,14 +1127,15 @@ class QueryGeneCollapser(CommandLineManager):
                         self.discarded_overextensions.update(insufficiently_covered)
                         # c = sufficiently_covered
                         c.remove_nodes_from(insufficiently_covered)
-                        if NX_VERSION < 2.4:
-                            clean_components: List[nx.Graph] = list(
-                                nx.connected_component_subgraphs(c)
-                            )
-                        else:
-                            clean_components: List[nx.Graph] = [
-                                graph.subgraph(c) for c in nx.connected_components(c)
-                            ]
+                        # if NX_VERSION < 2.4:
+                        #     clean_components: List[nx.Graph] = list(
+                        #         nx.connected_component_subgraphs(c)
+                        #     )
+                        # else:
+                        #     clean_components: List[nx.Graph] = [
+                        #         graph.subgraph(c) for c in nx.connected_components(c)
+                        #     ]
+                        clean_components: List[nx.Graph] = get_connected_components(c)
                         c: List[List[str]] = []
                         for clean_component in clean_components:
                             c.append(
@@ -1090,6 +1176,7 @@ class QueryGeneCollapser(CommandLineManager):
                     c = [list(c.nodes)]
             else:
                 c = [list(c.nodes)]
+            
             ## TODO:
             ## 1) think of how to store transcript-to-chromosome mapping
             ## 2) think of how to resolve multiple chromosomes in

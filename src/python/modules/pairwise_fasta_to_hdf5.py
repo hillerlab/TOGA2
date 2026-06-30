@@ -9,7 +9,7 @@ from typing import Dict, List, Optional, TextIO
 
 import click
 import h5py
-from numpy import bytes_
+from numpy import array, bytes_
 from .shared import CONTEXT_SETTINGS, CommandLineManager
 
 HEADER_START: str = ">"
@@ -83,40 +83,51 @@ class FastaToHdf5Converter(CommandLineManager):
 
     def write_proteins_for_phylo(self, input: TextIO, output: str) -> None:
         """
-        Writes pairwise protein Fasta records to HDF5, one dataset for each entry
+        Writes pairwise protein Fasta records to HDF5 as two parallel variable-length
+        string datasets: "keys" (sequence identifiers) and "values" (header + sequence).
         """
+        records: Dict[str, str] = {}
+        header: str = ""
+        hdf5_id: str = ""
+        seq_parts: List[str] = []
+
+        for line in input:
+            line = line.rstrip()
+            if not line:
+                continue
+            if line[0] == HEADER_START:
+                if header:
+                    if hdf5_id in records:
+                        self._die(
+                            "Sequence %s occurs twice in the input FASTA file" % hdf5_id
+                        )
+                    records[hdf5_id] = f"{header}\n{''.join(seq_parts)}"
+                    seq_parts = []
+                header = line
+                header_split: List[str] = header.split(" | ")
+                proj: str = header_split[0].lstrip(HEADER_START)
+                source: str = (
+                    REF_SOURCE if header_split[2] == REFERENCE else QUERY_SOURCE
+                )
+                hdf5_id = f"{proj}{source}"
+            else:
+                seq_parts.append(line)
+
+        if header:
+            records[hdf5_id] = f"{header}\n{''.join(seq_parts)}"
+
+        dt = h5py.string_dtype()
         with h5py.File(output, "w") as f:
-            header: str = ""
-            hdf5_id: str = ""
-            seq: str = ""
-            for line in input:
-                line = line.rstrip()
-                if not line:
-                    continue
-                if line[0] == HEADER_START:
-                    if header:
-                        try:
-                            f.create_dataset(hdf5_id, data=bytes_(f"{header}\n{seq}"))
-                            header = ""
-                            hdf5_id = ""
-                            seq = ""
-                        except ValueError as e:
-                            print(e)
-                            self._die(
-                                "Sequence %s occurs twice in the input FASTA file"
-                                % hdf5_id
-                            )
-                    header = line
-                    header_split: List[str] = header.split(" | ")
-                    proj: str = header_split[0].lstrip(HEADER_START)
-                    source: str = (
-                        REF_SOURCE if header_split[2] == REFERENCE else QUERY_SOURCE
-                    )
-                    hdf5_id = f"{proj}{source}"
-                else:
-                    seq += line
-            if header:
-                f.create_dataset(hdf5_id, data=bytes_(f"{header}\n{seq}"))
+            f.create_dataset(
+                "keys",
+                data=array(list(records.keys()), dtype=object),
+                dtype=dt,
+            )
+            f.create_dataset(
+                "values",
+                data=array(list(records.values()), dtype=object),
+                dtype=dt,
+            )
 
     def write_exons_for_sleasy(self, input: TextIO, output: str) -> None:
         """

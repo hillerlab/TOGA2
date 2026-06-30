@@ -5,13 +5,14 @@ A module for CESAR job binning based on maximal memory requirements
 """
 
 import os
-from collections import defaultdict, namedtuple
+from collections import defaultdict
+from dataclasses import dataclass
 from heapq import heappop, heappush
 from math import ceil
 
 from pathlib import Path
 from shutil import which
-from typing import Dict, List, Optional, Tuple, Type, Union
+from typing import Dict, List, Optional, Tuple, Union
 
 import click
 import networkx as nx
@@ -56,13 +57,25 @@ FIRST_ACCEPTOR: str = os.path.join(TOGA2_ROOT, *FIRST_ACCEPTOR)
 LAST_DONOR: str = os.path.join(TOGA2_ROOT, *LAST_DONOR)
 
 OK: str = ".ok"
-TOUCH: str = "touch {}"
+TOUCH: str = "touch {file}"
 
-ProjectionMeta: Type = namedtuple(
-    "ProjectionMeta",
-    ["name", "chain", "chrom", "start", "end", "max_mem", "sum_mem", "path"],
-)
+@dataclass
+class ProjectionMeta:
+    name: str
+    chain: str
+    chrom: str
+    start: int
+    end: int
+    max_mem: float
+    sum_mem: float
+    path: str
+    is_paralog: bool
+    is_ppgene: bool
 
+    def __lt__(self, other) -> bool:
+        if self.end == other.end:
+            return self.start < other.start
+        return self.end < other.end
 
 def fragmented_projection(chain_id: str) -> bool:
     return "," in chain_id
@@ -471,6 +484,14 @@ def fragmented_projection(chain_id: str) -> bool:
     show_default=True,
     help="Controls the execution verbosity",
 )
+@click.option(
+    "--debug",
+    is_flag=True,
+    default=False,
+    show_default=True,
+    help=""""Increases execution verbosity for debugging purpose; 
+automatically set the --verbose flag on"""
+)
 
 class CesarScheduler(CommandLineManager):
 
@@ -573,9 +594,11 @@ class CesarScheduler(CommandLineManager):
         bindings: Optional[Union[str, None]],
         toga1_compatible: Optional[bool],
         log_name: Optional[str],
-        verbose: bool,
+        verbose: Optional[bool],
+        debug: Optional[bool],
     ) -> None:
         self.v: bool = verbose
+        self.debug: bool = debug
         self.set_logging(name=log_name, toga_module="alignment_scheduler")
 
         self.memory_report: click.File = memory_report
@@ -724,7 +747,11 @@ class CesarScheduler(CommandLineManager):
         Given the path to a CESAR preprocessing report,
         parses the results producing a storage class instances
         """
-        tr2chrom2graph: Dict[str, Dict[str, nx.Graph]] = defaultdict(dict)
+        self._debug("Parsing memory report")
+        # tr2chrom2graph: Dict[str, Dict[str, nx.Graph]] = defaultdict(dict)
+        ## TODO: This part takes humiliatingly long in case of numerous overlapping projections
+        ## (~30 min for fishes with ~300k candidates when --annotate_orthologs is enabled)
+        raw_items: Dict[Tuple[str, str], List[ProjectionMeta]] = defaultdict(list)
         for line in self.memory_report.readlines():
             data: List[str] = line.rstrip().split("\t")
             if not data or not data[0]:
@@ -739,106 +766,141 @@ class CesarScheduler(CommandLineManager):
             chrom: str = data[7]
             start: int = int(data[8])
             stop: int = int(data[9])
-            max_inter: int = ceil((stop - start) * MIN_PROJ_OVERLAP_THRESHOLD)
+            # max_inter: int = ceil((stop - start) * MIN_PROJ_OVERLAP_THRESHOLD)
             path: str = data[-1]
-            entry: ProjectionMeta = ProjectionMeta(
-                proj, chain, chrom, start, stop, max_mem, sum_mem, path
-            )
+            # entry: ProjectionMeta = ProjectionMeta(
+            #     proj, chain, chrom, start, stop, max_mem, sum_mem, path
+            # )
             proj_is_ppgene: bool = (
                 self.processed_pseudogene_list is not None
                 and proj in self.processed_pseudogene_list
             )
-            if (
-                tr not in tr2chrom2graph.keys()
-                or chrom not in tr2chrom2graph[tr].keys()
-            ):
-                new_graph: nx.Graph = nx.Graph()
-                new_graph.add_node(entry)
-                tr2chrom2graph[tr][chrom] = new_graph
-            else:
-                tr2chrom2graph[tr][chrom].add_node(entry)
-                ## do not intersect fragmented and whole projections
-                if fragmented_projection(chain):
-                    continue
-                for node in tr2chrom2graph[tr][chrom].nodes():
-                    ## do not intersect orthologs/paralogs and retrocopy projections
-                    if self.processed_pseudogene_list is not None:
-                        in_is_ppgene: bool = (
-                            self.processed_pseudogene_list is not None
-                            and node.name in self.processed_pseudogene_list
-                        )
-                        if proj_is_ppgene != in_is_ppgene:
-                            continue
-                    ## if the current projection and a node in the subgraph intersect,
-                    ## traverse an edge between them
-                    _max_inter: int = ceil(
-                        (node.end - node.start) * MIN_PROJ_OVERLAP_THRESHOLD
-                    )
-                    inter: int = intersection(start, stop, node.start, node.end)
-                    if inter >= max_inter or inter >= _max_inter:
-                        tr2chrom2graph[tr][chrom].add_edge(entry, node)
+            proj_is_paralog: bool = (
+                self.paralog_list is not None and 
+                proj in self.paralog_list
+            )
+            entry: ProjectionMeta = ProjectionMeta(
+                proj, chain, chrom, start, stop, max_mem, sum_mem, path, proj_is_paralog, proj_is_ppgene,
+            )
+            raw_items[(tr, chrom)].append(entry)
+            # if (
+            #     tr not in tr2chrom2graph.keys()
+            #     or chrom not in tr2chrom2graph[tr].keys()
+            # ):
+            #     new_graph: nx.Graph = nx.Graph()
+            #     new_graph.add_node(entry)
+            #     tr2chrom2graph[tr][chrom] = new_graph
+            # else:
+            #     tr2chrom2graph[tr][chrom].add_node(entry)
+            #     ## do not intersect fragmented and whole projections
+            #     if fragmented_projection(chain):
+            #         continue
+            #     for node in tr2chrom2graph[tr][chrom].nodes():
+            #         ## do not intersect orthologs/paralogs and retrocopy projections
+            #         if self.processed_pseudogene_list is not None:
+            #             in_is_ppgene: bool = node.name in self.processed_pseudogene_list
+            #             if proj_is_ppgene != in_is_ppgene:
+            #                 continue
+            #         if self.paralog_list is not None:
+            #             in_is_paralog: bool = node.name in self.paralog_list
+            #             if proj_is_paralog != in_is_paralog:
+            #                 continue
+            #         ## if the current projection and a node in the subgraph intersect,
+            #         ## traverse an edge between them
+            #         _max_inter: int = ceil(
+            #             (node.end - node.start) * MIN_PROJ_OVERLAP_THRESHOLD
+            #         )
+            #         inter: int = intersection(start, stop, node.start, node.end)
+            #         if inter >= max_inter or inter >= _max_inter:
+            #             tr2chrom2graph[tr][chrom].add_edge(entry, node)
         ## now, resolve the resulting graph
-        for tr, chroms in tr2chrom2graph.items():
-            for chrom in chroms:
-                proj_graph: nx.Graph = tr2chrom2graph[tr][chrom]
-                if len(proj_graph.nodes()) == 1:
-                    sole_node: ProjectionMeta = next(iter(proj_graph.nodes()))
-                    proj_: str = sole_node.name
-                    self.proj2max_mem[proj_] = sole_node.max_mem
-                    self.proj2sum_mem[proj_] = sole_node.sum_mem
-                    self.proj2storage[proj_] = sole_node.path
-                    continue
-                components: List[nx.Graph] = get_connected_components(proj_graph)
-                for component in components:
-                    comp: nx.Graph = component.copy()
-                    ## remove potential chimeric projections
-                    art_nodes: List[ProjectionMeta] = list(nx.articulation_points(comp))
-                    # if debug and art_nodes:
-                    #     print(f'The following nodes are likely chimeric: {[x.name for x in art_nodes]}')
-                    for art_node in art_nodes:
-                        rej_reason: Tuple[str] = RejectionReasons.CHIMERIC_ENTRY.format(art_node.name)
-                        self.rejected_transcripts.append(rej_reason)
-                    comp.remove_nodes_from(art_nodes)
-                    subcliques: List[nx.Graph] = get_connected_components(comp)
-                    for subclique in subcliques:
-                        # print(f'Starting a new subclique: {[x.name for x in subclique.nodes()]}')
-                        # min_mem: float = min(x.max_mem for x in subclique.nodes())
-                        # min_mem_nodes: List[ProjectionMeta] = [
-                        #     x for x in subclique.nodes() if x.max_mem == min_mem
-                        # ]
-                        # if len(min_mem_nodes) > 1:
-                        #     min_mem_nodes.sort(key=lambda x: int(x.chain))
-                        # # if debug:
-                        # #     for eee in min_mem_nodes:
-                        # #         print(f'min_mem_node: {eee}')
-                        # best_pick_node: ProjectionMeta = min_mem_nodes[0]
-                        # # if debug:
-                        # #     print(f'{best_pick_node=}')
-                        # # print('-'*30 + '\n')
-                        # proj_: str = best_pick_node.name
-                        # self.proj2max_mem[proj_] = best_pick_node.max_mem
-                        # self.proj2sum_mem[proj_] = best_pick_node.sum_mem
-                        # self.proj2storage[proj_] = best_pick_node.path
-                        # for redundant_node in subclique.nodes:
-                        #     if redundant_node.name == proj_:
-                        #         continue
-                        #     rej_reason: Tuple[str] = REDUNDANT_ENTRY.format(
-                        #         redundant_node.name
-                        #     )
-                        #     self.rejected_transcripts.append(rej_reason)
-                        for node in subclique.nodes():
-                            proj_: str = node.name
-                            if (
-                                self.max_bin is None
-                                or node.max_mem < self.max_bin
-                                or self.allow_heavy_jobs
-                            ):
-                                self.proj2max_mem[proj_] = node.max_mem
-                                self.proj2sum_mem[proj_] = node.sum_mem
-                                self.proj2storage[proj_] = node.path
-                            else:
-                                rej_reason: Tuple[str] = RejectionReasons.REDUNDANT_ENTRY.format(proj_)
-                                self.rejected_transcripts.append(rej_reason)
+        self._debug("Assessing search space intersections")
+        # for tr, chroms in tr2chrom2graph.items():
+        for (tr, chrom), entries in raw_items.items():
+            entries.sort(key=lambda x: (x.start, x.end))
+            proj_graph: nx.Graph = nx.Graph()
+            active: List[ProjectionMeta] = []
+            for e1 in entries:
+                max_inter: int = ceil((e1.end - e1.start) * MIN_PROJ_OVERLAP_THRESHOLD)
+                proj_graph.add_node(e1)
+                if not fragmented_projection(e1.chain):
+                    while active and active[0].end <= e1.start:
+                        heappop(active)
+                    for e2 in active:
+                        if e1.is_paralog != e2.is_paralog:
+                            continue
+                        if e1.is_ppgene != e2.is_ppgene:
+                            continue
+                        if fragmented_projection(e2.chain):
+                            continue
+                        _max_inter: int = ceil(
+                            (e2.end - e2.start) * MIN_PROJ_OVERLAP_THRESHOLD
+                        )
+                        inter: int = intersection(e1.start, e1.end, e2.start, e2.end)
+                        if inter >= max_inter or inter >= _max_inter:
+                            proj_graph.add_edge(e1, e2)
+                    heappush(active, e1)
+            # self._debug("")
+            # for chrom in chroms:
+            #     proj_graph: nx.Graph = tr2chrom2graph[tr][chrom]
+            if len(proj_graph.nodes()) == 1:
+                sole_node: ProjectionMeta = next(iter(proj_graph.nodes()))
+                proj_: str = sole_node.name
+                self.proj2max_mem[proj_] = sole_node.max_mem
+                self.proj2sum_mem[proj_] = sole_node.sum_mem
+                self.proj2storage[proj_] = sole_node.path
+                continue
+            components: List[nx.Graph] = get_connected_components(proj_graph)
+            for component in components:
+                comp: nx.Graph = component.copy()
+                ## remove potential chimeric projections
+                art_nodes: List[ProjectionMeta] = list(nx.articulation_points(comp))
+                # if debug and art_nodes:
+                #     print(f'The following nodes are likely chimeric: {[x.name for x in art_nodes]}')
+                for art_node in art_nodes:
+                    rej_reason: Tuple[str] = RejectionReasons.CHIMERIC_ENTRY.format(art_node.name)
+                    self.rejected_transcripts.append(rej_reason)
+                comp.remove_nodes_from(art_nodes)
+                subcliques: List[nx.Graph] = get_connected_components(comp)
+                for subclique in subcliques:
+                    # print(f'Starting a new subclique: {[x.name for x in subclique.nodes()]}')
+                    # min_mem: float = min(x.max_mem for x in subclique.nodes())
+                    # min_mem_nodes: List[ProjectionMeta] = [
+                    #     x for x in subclique.nodes() if x.max_mem == min_mem
+                    # ]
+                    # if len(min_mem_nodes) > 1:
+                    #     min_mem_nodes.sort(key=lambda x: int(x.chain))
+                    # # if debug:
+                    # #     for eee in min_mem_nodes:
+                    # #         print(f'min_mem_node: {eee}')
+                    # best_pick_node: ProjectionMeta = min_mem_nodes[0]
+                    # # if debug:
+                    # #     print(f'{best_pick_node=}')
+                    # # print('-'*30 + '\n')
+                    # proj_: str = best_pick_node.name
+                    # self.proj2max_mem[proj_] = best_pick_node.max_mem
+                    # self.proj2sum_mem[proj_] = best_pick_node.sum_mem
+                    # self.proj2storage[proj_] = best_pick_node.path
+                    # for redundant_node in subclique.nodes:
+                    #     if redundant_node.name == proj_:
+                    #         continue
+                    #     rej_reason: Tuple[str] = REDUNDANT_ENTRY.format(
+                    #         redundant_node.name
+                    #     )
+                    #     self.rejected_transcripts.append(rej_reason)
+                    for node in subclique.nodes():
+                        proj_: str = node.name
+                        if (
+                            self.max_bin is None
+                            or node.max_mem < self.max_bin
+                            or self.allow_heavy_jobs
+                        ):
+                            self.proj2max_mem[proj_] = node.max_mem
+                            self.proj2sum_mem[proj_] = node.sum_mem
+                            self.proj2storage[proj_] = node.path
+                        else:
+                            rej_reason: Tuple[str] = RejectionReasons.REDUNDANT_ENTRY.format(proj_)
+                            self.rejected_transcripts.append(rej_reason)
 
     def allocate_job_numbers(self) -> None:
         """
@@ -1081,7 +1143,7 @@ class CesarScheduler(CommandLineManager):
                     ok_file: str = os.path.join(
                         self.cesar_output_directory, f"batch{jobid}", OK
                     )
-                    h2.write(TOUCH.format(ok_file) + "\n")
+                    h2.write(TOUCH.format(file=ok_file) + "\n")
                 ## make the partition files executable
                 file_mode: bytes = os.stat(jobfile_dest).st_mode
                 file_mode |= (file_mode & 0o444) >> 2

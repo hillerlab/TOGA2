@@ -186,6 +186,7 @@ SINGLE_EXON_MIN_REF_LEN_PERC: float = 0.3
 MIN_PROJ_OVERLAP_THRESHOLD: float = 0.5
 EXTRA_FLANK: float = 0.1
 SEARCH_OFFSET: int = 12  ## offset to add to the potential gained intron sequence
+MAX_INTRON_GROUP_NUM: int = 50 ## max intron layout group number
 
 ## length and size constants
 FLANK_SPACE: int = 50

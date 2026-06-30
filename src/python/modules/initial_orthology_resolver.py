@@ -599,6 +599,9 @@ def fasta_sort_key(fasta_seq: str) -> Tuple[int, str]:
 @click.option(
     "--verbose", "-v", is_flag=True, default=False, help="Control logging verbosity"
 )
+@click.option(
+    "--debug", is_flag=True, default=False,  help="Increases logging verbosity"
+)
 class InitialOrthologyResolver(CommandLineManager):
     """
     Resolves orthology relationships from the raw TOGA output; if specified,
@@ -654,6 +657,7 @@ class InitialOrthologyResolver(CommandLineManager):
         "rejection_file",
         "jobs2cliques",
         "jobfile",
+        "protein_index",
     )
 
     def __init__(
@@ -688,8 +692,10 @@ class InitialOrthologyResolver(CommandLineManager):
         bindings: Optional[Union[str, None]],
         log_name: Optional[str],
         verbose: Optional[bool],
+        debug: Optional[bool],
     ) -> None:
         self.v: bool = verbose
+        self.debug: bool = debug
         self.set_logging(name=log_name, toga_module="orthology_initial")
 
         self._to_log("Extracting reference transcripts names for orthology resolution")
@@ -811,12 +817,14 @@ class InitialOrthologyResolver(CommandLineManager):
             self._mkdir(self.job_dir)
             self._mkdir(self.fasta_dir)
             self._mkdir(self.res_dir)
+        self._to_log("Creating gene orthology graph")
         self.create_gene_graph()
+        self._to_log("Extracting connected components from the orthology graph")
         self.extract_connected_components()
+        self._to_log("Writing orthologous components")
         self.write_resolved_orthologies()
         if self.tree_resolver:
             self.schedule_tree_jobs()
-            # self.write_job_files()
             self.extract_seqs_and_write_jobs()
 
     def check_executables(self) -> None:
@@ -1307,6 +1315,13 @@ class InitialOrthologyResolver(CommandLineManager):
                 output_dict[header] = seq
         return output_dict
 
+    def _load_protein_index(self) -> Dict[str, str]:
+        with h5py.File(self.fasta_file, "r") as f:
+            keys = list(map(lambda x: x.decode("utf"), f["keys"][()]))#.tolist()
+            values = list(map(lambda x: x.decode("utf8"), f["values"][()]))#.tolist()
+        # print(f"{keys[:10]=}")
+        return dict(zip(keys, values))
+
     def extract_from_hdf(self, names: List[str]) -> Dict[str, str]:
         """
         Extracts entries from the HDF5-converted pairwise FASTA
@@ -1314,6 +1329,7 @@ class InitialOrthologyResolver(CommandLineManager):
         output_dict: Dict[str, str] = {}
         # gene2longest_isoform: Dict[str, Tuple[str, int]] = {}
         # gene2status: Dict[str, str] = {}
+        index: Dict[str, str] = self._load_protein_index()
         for gene in names:
             is_ref: bool = False
             if gene in self.gene2tr_ref:
@@ -1328,50 +1344,49 @@ class InitialOrthologyResolver(CommandLineManager):
                     "Gene %s does not have any transcripts in either reference or query"
                     % gene,
                 )
-            with h5py.File(self.fasta_file, "r") as f:
-                if is_ref:
-                    projs: List[str] = [
-                        x.rstrip(postfix)
-                        for x in f.keys()
-                        if postfix in x and get_proj2trans(x)[0] in trs
-                    ]
-                    projs = [
-                        x for x in projs if x in self.tr2proj[get_proj2trans(x)[0]]
-                    ]
-                    best_status: str = max(
-                        [
-                            self.loss_status.get(x, N)
-                            for x in projs
-                            if x not in self.processed_pseudogenes
-                            and x not in self.paralogs
-                        ],
-                        key=lambda y: CLASS_TO_NUM[y],
-                    )
-                else:
-                    projs: List[str] = trs
-                    best_status: str = max(
-                        [
-                            self.loss_status.get(x, N)
-                            for x in projs
-                            if x not in self.processed_pseudogenes
-                            and x not in self.paralogs
-                        ],
-                        key=lambda y: CLASS_TO_NUM[y],
-                    )
-                best_projs: List[str] = [
-                    x for x in projs if self.loss_status.get(x, N) == best_status
+            if is_ref:
+                projs: List[str] = [
+                    x.rstrip(postfix)
+                    for x in index.keys()
+                    if postfix in x and get_proj2trans(x)[0] in trs
                 ]
-                header, seq = "", ""
-                for proj in best_projs:
-                    entry: str = f[f"{proj}{postfix}"][()].decode("utf8")
-                    _header, _seq = entry.split("\n")
-                    if len(_seq) > len(seq):
-                        header, seq = _header, _seq
-                if not header or not seq:
-                    self._die(
-                        "Failed to find the longest relevant isoform for gene %s" % gene
-                    )
-                output_dict[header] = seq
+                projs = [
+                    x for x in projs if x in self.tr2proj[get_proj2trans(x)[0]]
+                ]
+                best_status: str = max(
+                    [
+                        self.loss_status.get(x, N)
+                        for x in projs
+                        if x not in self.processed_pseudogenes
+                        and x not in self.paralogs
+                    ],
+                    key=lambda y: CLASS_TO_NUM[y],
+                )
+            else:
+                projs: List[str] = trs
+                best_status: str = max(
+                    [
+                        self.loss_status.get(x, N)
+                        for x in projs
+                        if x not in self.processed_pseudogenes
+                        and x not in self.paralogs
+                    ],
+                    key=lambda y: CLASS_TO_NUM[y],
+                )
+            best_projs: List[str] = [
+                x for x in projs if self.loss_status.get(x, N) == best_status
+            ]
+            header, seq = "", ""
+            for proj in best_projs:
+                entry: str = index[f"{proj}{postfix}"]
+                _header, _seq = entry.split("\n")
+                if len(_seq) > len(seq):
+                    header, seq = _header, _seq
+            if not header or not seq:
+                self._die(
+                    "Failed to find the longest relevant isoform for gene %s" % gene
+                )
+            output_dict[header] = seq
         return output_dict
 
     def write_job_files(self) -> None:
@@ -1387,7 +1402,7 @@ class InitialOrthologyResolver(CommandLineManager):
                 all_fasta_files: List[str] = []
                 for c in cliques:
                     clique: List[str] = self.cliques_to_resolve[c]
-                    self._to_log(
+                    self._debug(
                         f"Writing FASTA input for clique {c} ({len(clique)} sequences)"
                     )
                     if self.hdf5_fasta:
@@ -1440,7 +1455,7 @@ class InitialOrthologyResolver(CommandLineManager):
                 os.chmod(job_path, file_mode)
                 jl.write(job_path + "\n")
 
-    def pick_representatives(self, clique: List[str], storage: Any) -> List[str]:
+    def pick_representatives(self, clique: List[str]) -> List[str]:
         """ """
         output_list: List[str] = []
         query_genes: List[str] = [x for x in clique if x in self.gene2tr_que]
@@ -1465,9 +1480,7 @@ class InitialOrthologyResolver(CommandLineManager):
                 all_projections.append(proj)
                 loss_status: str = self.loss_status.get(proj, N)
                 seq_id: str = f"{proj}_query"
-                seq: str = (
-                    storage[seq_id][()].decode("utf8").split("\n")[1].replace("-", "")
-                )
+                seq: str = self.protein_index[seq_id].split("\n")[1].replace("-", "")
                 prev_header, prev_seq = gene2longest.get(query_gene, ("", ""))
                 new_is_longer: bool = len(seq) > len(prev_seq)
                 same_length: bool = len(seq) == len(prev_seq)
@@ -1507,9 +1520,7 @@ class InitialOrthologyResolver(CommandLineManager):
                 chain_id: int = int(chain_id.split(",")[0])
                 loss_status: str = self.loss_status.get(proj, N)
                 seq_id: str = f"{proj}_ref"
-                seq: str = (
-                    storage[seq_id][()].decode("utf8").split("\n")[1].replace("-", "")
-                )
+                seq: str = self.protein_index[seq_id].split("\n")[1].replace("-", "")
                 prev_header, prev_seq = ref_gene2longest.get(ref_gene, ("", ""))
                 new_is_longer: bool = len(seq) > len(prev_seq)
                 same_length: bool = len(seq) == len(prev_seq)
@@ -1546,7 +1557,8 @@ class InitialOrthologyResolver(CommandLineManager):
         """
         if not self.jobs2cliques:
             return
-        with open(self.jobfile, "w") as jl, h5py.File(self.fasta_file, "r") as f:
+        self.protein_index: Dict[str, str] = self._load_protein_index()
+        with open(self.jobfile, "w") as jl:
             for j, cliques in self.jobs2cliques.items():
                 job_path: str = os.path.join(self.job_dir, f"batch{j}.ex")
                 table_path: str = os.path.join(self.fasta_dir, f"batch{j}.txt")
@@ -1554,10 +1566,10 @@ class InitialOrthologyResolver(CommandLineManager):
                 all_fasta_files: List[str] = []
                 for n, c in enumerate(cliques):
                     clique: List[str] = self.cliques_to_resolve[c]
-                    self._to_log(
+                    self._debug(
                         f"Writing FASTA input for clique {c} ({len(clique)} sequences)"
                     )
-                    fasta_seqs: List[str] = self.pick_representatives(clique, f)
+                    fasta_seqs: List[str] = self.pick_representatives(clique)
                     if all(len(x.split("\n")[1]) < 50 for x in fasta_seqs):
                         self._to_log(
                             (
