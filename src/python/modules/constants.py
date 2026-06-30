@@ -504,8 +504,29 @@ class RejectionReasons:
         (
             "TRANSCRIPT",
             "{}",
-            "0Located outside of user-preferred contigs",
+            "0",
+            "Located outside of user-preferred contigs",
             "REJECTED_CONTIG",
+            "N",
+        )
+    )
+    SHORT_EXON_REASON: str ="\t".join(
+        (
+            "TRANSCRIPT", 
+            "{}", 
+            "0", 
+            "Contains internal (non-terminal) exon shorter than three bases", 
+            "SHORT_EXON",
+            "N",
+        )
+    )
+    SHORT_INTRON_REASON: str = "\t".join(
+        (
+            "TRANSCRIPT",
+            "{}",
+            "0",
+            "Contains short (<{} bp) coding sequence introns",
+            "SHORT_INTRON",
             "N",
         )
     )
@@ -514,6 +535,9 @@ class RejectionReasons:
     )
     FRAME_REJ_REASON: str = "\t".join(
         ("TRANSCRIPT", "{}", "0", "Transcript is out of frame", "OUT_OF_FRAME", "N")
+    )
+    NMD_REASON: str = "\t".join(
+        ("TRANSCRIPT", "{}", "0", "Nonsense-mediated decay target", "NONSENSE_MEDIATED_DECAY", "N")
     )
     UNCOV_CHROM: str = "\t".join(
         (
@@ -1150,6 +1174,7 @@ TOGA2_SLOTS: Tuple[str, ...] = (
     "toga1",
     "toga1_plus_cesar",
     "tmp",
+    "user_tmp",
     "logs",
     "meta",
     "ucsc_dir",

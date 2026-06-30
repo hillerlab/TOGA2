@@ -11,7 +11,12 @@ from typing import Any, Dict, Iterable, List, Optional, Tuple, TypeVar, Union
 # from Operator import mul
 from shared import parts
 
-from .cesar_wrapper_constants import GAP_CODON, MIN_INTRON_LENGTH, STOPS
+from .cesar_wrapper_constants import (
+    GAP_CODON,
+    MAX_INTRON_GROUP_NUM,
+    MIN_INTRON_LENGTH,
+    STOPS,
+)
 from .cesar_wrapper_executables import CesarInput, RawCesarOutput, fast_seq_id
 
 __author__ = "Yury V. Malovichko"
@@ -798,7 +803,6 @@ class IntronGainChecker:
         potential_exon_groups.sort(key=lambda x: x.group_donor())
 
         closest_donor: int = potential_exon_groups[0].group_donor()
-        # print(f'{potential_exons=}, {exon=}')
         for i, pot_exon in enumerate(potential_exons):
             acc, donor, acc_prob, donor_prob = pot_exon
             ## exons starting with an original acceptor site have been
@@ -888,22 +892,6 @@ class IntronGainChecker:
                         f"SKIPPING: Gap- and mutation-independent intron at {group_donor}-{acc} (exon {exon}) has insufficient SpliceAI support"
                     )
                     continue
-                # if not has_gap and (
-                #     (acc_prob < self.min_intron_prob_ungapped) or
-                #     (group.group_donor_prob() < self.min_intron_prob_ungapped and not last_subexon   )
-                # ):
-                #     print(
-                #         f'SKIPPING: Gap-independent intron at {group_donor}-{acc} (exon {exon}) has insufficient SpliceAI support'
-                #     )
-                #     continue
-                # if has_gap and (
-                #     (acc_prob < self.min_intron_prob_gapped) or
-                #     (group.group_donor_prob() < self.min_intron_prob_gapped and not last_subexon)
-                # ):
-                #     print(
-                #         f'SKIPPING: Gap-guided intron at {group_donor}-{acc} (exon {exon}) has insufficient SpliceAI support'
-                #     )
-                #     continue
                 ## introduced introns cannot split inframe stop codons
                 if self._alternative_split_contains_stop(
                     portion, group_donor, acc, group.donor_phase()
@@ -939,6 +927,18 @@ class IntronGainChecker:
                     % 3
                 )
                 new_groups.append(modif_group)
+                if (
+                    len(potential_exon_groups) + len(new_groups) - len(groups_to_remove)
+                    > MAX_INTRON_GROUP_NUM
+                ):
+                    self._to_log(
+                        (
+                            "The current number of available groups exceeds the threshold value of %i; "
+                            "exiting without further reference-absent intron annotation"
+                        ), 
+                        "warning"
+                    )
+                    return
             potential_exon_groups = [
                 x for x in potential_exon_groups if x not in groups_to_remove
             ]
@@ -947,7 +947,7 @@ class IntronGainChecker:
             closest_donor = potential_exon_groups[0].group_donor()
 
         ## for each group, find the number of mutations removed with the
-        sorted_groups: List[PotExGroup] = []
+        # sorted_groups: List[PotExGroup] = []
         init_exon_len: int = len(strip_noncoding(portion.query[start:stop]))
         if len(potential_exon_groups) == 1:
             return
@@ -962,8 +962,8 @@ class IntronGainChecker:
             # splice_prob_sum: int = 0
             intron_len_sum: int = 0
             intron_num: int = 0
-            gained_muts: int = 0
-            lost_muts: int = 0
+            # gained_muts: int = 0
+            # lost_muts: int = 0
             for i in range(1, len(group.exon_tuples)):
                 prev_exon: Tuple[int, int, float, float] = group.exon_tuples[i - 1]
                 next_exon: Tuple[int, int, float, float] = group.exon_tuples[i]

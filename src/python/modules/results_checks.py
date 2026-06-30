@@ -1121,7 +1121,7 @@ class LogParserForSummary(CommandLineManager):
                     args[ORTH_THRESH] = float(data[1])
                 except ValueError:
                     self._die(
-                        "Orthology probability threshold is not a valid floating point number"
+                        "Orthology probability threshold %s is not a valid floating point number"
                         % data[1]
                     )
             if data[0] == ACCEPTED_CLASSES:
@@ -1195,7 +1195,7 @@ class LogParserForSummary(CommandLineManager):
                         args[ORTH_THRESH] = float(value)
                     except ValueError:
                         self._die(
-                            "Orthology probability threshold is not a valid floating point number"
+                            "Orthology probability threshold %s is not a valid floating point number"
                             % value
                         )
                     continue
@@ -1260,7 +1260,7 @@ class LogParserForSummary(CommandLineManager):
                         args[ORTH_THRESH] = float(value)
                     except ValueError:
                         self._die(
-                            "Orthology probability threshold is not a valid floating point number"
+                            "Orthology probability threshold %s is not a valid floating point number"
                             % value
                         )
                     continue
