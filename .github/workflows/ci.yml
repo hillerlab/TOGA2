@@ -82,7 +82,7 @@ jobs:
         uses: actions/cache@v5
         with:
           path: ~/.cache/pip
-          key: ${{ runner.os }}-py${{ matrix.python-version }}-pip-${{ hashFiles('**/requirements.txt') }}
+          key: ${{ runner.os }}-py${{ matrix.python-version }}-pip-${{ hashFiles('**/assets/requirements/requirements.txt') }}
           restore-keys: |
             ${{ runner.os }}-py${{ matrix.python-version }}-pip-
 
@@ -108,7 +108,7 @@ jobs:
           python -c "import sys, sysconfig, platform; print(sys.executable); print(sysconfig.get_platform()); print(platform.machine())"
 
           python -m pip install --upgrade pip setuptools wheel maturin
-          python -m pip install -r requirements.txt
+          python -m pip install -r assets/requirements/requirements.txt
 
       - name: Install third-party dependencies
         run: |
@@ -157,7 +157,7 @@ jobs:
           source toga2/bin/activate
 
           python -m pip install --upgrade pip setuptools wheel
-          python -m pip install -r requirements.txt
+          python -m pip install -r assets/requirements/requirements.txt
 
           make build_cython
 

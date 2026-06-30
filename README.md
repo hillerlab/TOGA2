@@ -1,11 +1,46 @@
-# TOGA2
-<img src="https://github.com/hillerlab/TOGA2/blob/develop/wiki/LOGO_TOGA2.png" width="350">
+<p align="center">
+  <p align="center">
+    <img width=200 align="center" src="./wiki/LOGO_TOGA2.png" >
+  </p>
 
-TOGA2: A faster, more versatile successor of Tool to infer Orthologs from Genome Alignments
+  <p align="center">
+    <img width=200 align="center" src="./wiki/hillerlab.png" >
+  </p>
+
+  <span>
+    <h1 align="center">
+        TOGA2
+    </h1>
+  </span>
+
+  <p align="center">
+    <a href="https://github.com/hillerlab/TOGA2" reference="_blank">
+      <img alt="GitHub License" src="https://img.shields.io/github/license/hillerlab/TOGA2?color=blue">
+    </a>
+  </p>
+
+  <p align="center">
+    <samp>
+        <span> TOGA2: A faster, more versatile successor of Tool to infer Orthologs from Genome Alignments </span>
+        <br>
+        <span> The Hiller Lab at the Senckenberg Research Institute </span>
+        <br>
+        <br>
+        <a href="https://github.com/hillerlab/TOGA2/wiki">docs</a> .
+        <a href="https://github.com/hillerlab/TOGA2?tab=readme-ov-file#Installation">install</a> .
+        <a href="https://hillerlab.com/">us</a> 
+    </samp>
+  </p>
+
+</p>
+
+---
 
 ## Documentation
 Detailed explanations of all output files can be found in our
 [TOGA2 Wiki](https://github.com/hillerlab/TOGA2/wiki).
+
+---
 
 ## Changelog
 ### v2.0.9
@@ -27,6 +62,8 @@ Detailed explanations of all output files can be found in our
     * Adding input annotation for two turtle (*Emydura macquarii macquarii*, *Emys orbicularis*) and five percomoprh fishes (*Gasterosteus aculeatus*, *Hippoglossus stenolepis*, *Melanotaenia boesemani*, *Nothobranchius furzeri*, *Synchiropus splendidus*) reference species.
 
 For the full list of code changes, see [changelog.md](https://github.com/hillerlab/TOGA2/blob/main/changelog.md) .
+
+---
 
 ## Installation
 
@@ -54,7 +91,7 @@ As an alternative to Python virtual environment, you can also use Conda for envi
 ```bash
 git clone --recurse-submodules https://github.com/hillerlab/TOGA2
 cd TOGA2
-conda env create -f conda.yaml
+conda env create -f assets/venv/conda.yaml
 conda activate toga2
 make
 ```
@@ -77,6 +114,8 @@ you should see the TOGA2 start menu.
 
 >[!NOTE]
 > The image provided in `supply/` directory contains the latest TOGA2 release, third-party software used for input preparation and TOGA2 annotation, and Nextflow for parallel process management. The container, however, does <ins>not</ins> contain any Nextflow-compatible parallel job executor. To set up your container for batch manager compatibility, see README at `supply/containers` and example recipe at `supply/containters/apptainer_slurm.def`
+
+---
 
 ## Running TOGA2
 If activated without additional arguments (`toga2.py`), the following start screen is displayed in the user's terminal:
@@ -110,6 +149,8 @@ Commands:
   test                Test TOGA2 with companion dataset
 ```
 Except for `toga2.py test`, invoking any of the listed commands without arguments also displays the help message. You can also invoke help message for TOGA2 or any of its commands with `--help/-h` option.
+
+---
 
 ## Test run
 To ensure that TOGA2 was installed properly, run the following command:
