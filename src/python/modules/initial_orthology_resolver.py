@@ -14,6 +14,7 @@ from typing import Any, Dict, Iterable, List, Optional, Set, TextIO, Tuple, Unio
 import click
 import h5py
 import networkx as nx
+import numpy as np
 
 from .cesar_wrapper_constants import (
     CLASS_TO_NUM,
@@ -91,6 +92,70 @@ class FilteringFeatures:
         self.exon_cov_ratio: float = exon_cov_ratio
         self.exon_coverage: float = exon_coverage
         self.intron_coverage: float = intron_coverage
+
+
+class ProteinIndex:
+    """
+    Lazy read-only accessor for the sorted two-array HDF5 protein index.
+    Loads only the key strings into RAM; values are fetched individually
+    from the open file handle via binary search.
+    """
+    # __slots__ = ("file", "keys_sorted", "perm", )
+    __slots__ = ("file", "names", "positions")
+
+    def __init__(self, file: TextIO) -> None:
+        self.file: TextIO = file
+        ## load sequence names; guaranteed to be sorted by pairwise_fasta_to_hdf5.py
+        raw_names: np.ndarray = self.file["name"][()]
+        self.names: np.ndarray = np.array([k.decode() for k in raw_names])
+        ## also, load the accompanying indices; must correspond to self.names
+        self.positions: np.ndarray = self.file["seq_num"][()]
+        # raw_keys = self.file["name"][()]
+        # keys: np.ndarray = np.array([k.decode() for k in raw_keys])
+        # self.perm: np.ndarray = np.argsort(keys, kind="stable")   # permutation: sorted → file index
+        # self.keys_sorted: np.ndarray = keys[self.perm]
+
+    def __getitem__(self, key: str) -> str:
+        # pos: int = int(np.searchsorted(self.keys_sorted, key))
+        # if pos >= len(self.keys_sorted) or self.keys_sorted[pos] != key:
+        #     raise KeyError(key)
+        pos: int = int(np.searchsorted(self.names, key))
+        if pos >= len(self.names) or self.names[pos] != key:
+            raise KeyError(key)
+        seq_pos: int = self.positions[pos]
+        # file_idx = int(self.perm[pos])
+        raw = self.file["seq"][seq_pos]       # single-element HDF5 read
+        return raw.decode() if isinstance(raw, bytes) else str(raw)
+
+    def __contains__(self, key: str) -> bool:
+        pos = int(np.searchsorted(self.names, key))
+        return pos < len(self.names) and self.names[pos] == key
+
+    def __del__(self) -> None:
+        try:
+            self.file.close()
+        except Exception:
+            pass
+
+
+class ProteinHdfContext:
+    """
+    """
+
+    __slots__ = ("filepath", "file")
+
+    def __init__(self, path: str) -> None:
+        self.filepath: str = path
+
+    def __enter__(self) -> ProteinIndex:
+        self.file: TextIO = h5py.File(self.filepath, "r")
+        return ProteinIndex(self.file)
+
+    def __exit__(self, *_) -> None:
+        try:
+            self.file.close()
+        except Exception:
+            pass
 
 
 def extract_names_from_bed(file: TextIO) -> List[str]:
@@ -1315,12 +1380,18 @@ class InitialOrthologyResolver(CommandLineManager):
                 output_dict[header] = seq
         return output_dict
 
-    def _load_protein_index(self) -> Dict[str, str]:
-        with h5py.File(self.fasta_file, "r") as f:
-            keys = list(map(lambda x: x.decode("utf"), f["keys"][()]))#.tolist()
-            values = list(map(lambda x: x.decode("utf8"), f["values"][()]))#.tolist()
-        # print(f"{keys[:10]=}")
-        return dict(zip(keys, values))
+    # def _load_protein_index(self) -> Dict[str, str]:
+    #     with h5py.File(self.fasta_file, "r") as f:
+    #         keys: List[str] = list(map(lambda x: x.decode("utf"), f["keys"][()]))#.tolist()
+    #         values: List[str] = list(map(lambda x: x.decode("utf8"), f["values"][()]))#.tolist()
+    #     # print(f"{keys[:10]=}")
+    #     return dict(zip(keys, values))
+
+    def _load_protein_index(self) -> ProteinIndex:
+        """
+        Creates a ProteinIndex handle for 
+        """
+        return ProteinIndex(self.fasta_file)
 
     def extract_from_hdf(self, names: List[str]) -> Dict[str, str]:
         """
@@ -1389,73 +1460,73 @@ class InitialOrthologyResolver(CommandLineManager):
             output_dict[header] = seq
         return output_dict
 
-    def write_job_files(self) -> None:
-        """
-        Writes input FASTA files, job files, and a job list
-        for fine orthology resolution step
-        """
-        with open(self.jobfile, "w") as jl:
-            for j, cliques in self.jobs2cliques.items():
-                job_path: str = os.path.join(self.job_dir, f"batch{j}.ex")
-                table_path: str = os.path.join(self.fasta_dir, f"batch{j}.txt")
-                res_path: str = os.path.join(self.res_dir, f"batch{j}")
-                all_fasta_files: List[str] = []
-                for c in cliques:
-                    clique: List[str] = self.cliques_to_resolve[c]
-                    self._debug(
-                        f"Writing FASTA input for clique {c} ({len(clique)} sequences)"
-                    )
-                    if self.hdf5_fasta:
-                        fasta_seqs: Dict[str, str] = self.extract_from_hdf(clique)
-                    else:
-                        fasta_seqs: Dict[str, str] = self.extract_from_fasta(clique)
-                    fasta_path: str = os.path.join(
-                        self.fasta_dir, f"batch{j}_clique{c}.fa"
-                    )
-                    with open(fasta_path, "w") as fp:
-                        for header, seq in fasta_seqs.items():
-                            fp.write(header + "\n" + seq + "\n")
-                    fasta_path = os.path.abspath(fasta_path)
-                    all_fasta_files.append(fasta_path)
-                with open(table_path, "w") as t:
-                    for fasta_file in all_fasta_files:
-                        t.write(fasta_file + "\n")
-                table_path = os.path.abspath(table_path)
-                res_path = os.path.abspath(res_path)
-                if self.container_image is not None:
-                    executor: str = f"{self.container_executor} run {{}} {{}} {{}} {FINE_RESOLVER_REL}"
-                else:
-                    executor: str = FINE_RESOLVER
-                cmd: str = (
-                    f"{executor} {table_path} {res_path} -t "
-                    f"-pb {self.prank_bin} -rb {self.tree_bin} "
-                    f"-rc {self.tree_cpus} -rs {self.tree_bootnum} "
-                )
-                if self.container_image is not None:
-                    if self.binding_map is not None:
-                        bind_key: str = CONTAINER_ENGINE2BIND_KEY[
-                            self.container_executor
-                        ]
-                        bindings: str = (
-                            self.bindings if self.bindings is not None else ""
-                        )
-                        for key, value in self.binding_map.items():
-                            if not value:
-                                continue
-                            cmd = cmd.replace(key, value)
-                        cmd = cmd.format(bind_key, bindings, self.container_image)
-                    else:
-                        cmd = cmd.format("", "", self.container_image)
-                job_path = os.path.abspath(job_path)
-                with open(job_path, "w") as jf:
-                    jf.write("\n".join(SPLIT_JOB_HEADER) + "\n")
-                    jf.write(cmd + "\n")
-                file_mode: bytes = os.stat(job_path).st_mode
-                file_mode |= (file_mode & 0o444) >> 2
-                os.chmod(job_path, file_mode)
-                jl.write(job_path + "\n")
+    # def write_job_files(self) -> None:
+    #     """
+    #     Writes input FASTA files, job files, and a job list
+    #     for fine orthology resolution step
+    #     """
+    #     with open(self.jobfile, "w") as jl:
+    #         for j, cliques in self.jobs2cliques.items():
+    #             job_path: str = os.path.join(self.job_dir, f"batch{j}.ex")
+    #             table_path: str = os.path.join(self.fasta_dir, f"batch{j}.txt")
+    #             res_path: str = os.path.join(self.res_dir, f"batch{j}")
+    #             all_fasta_files: List[str] = []
+    #             for c in cliques:
+    #                 clique: List[str] = self.cliques_to_resolve[c]
+    #                 self._debug(
+    #                     f"Writing FASTA input for clique {c} ({len(clique)} sequences)"
+    #                 )
+    #                 if self.hdf5_fasta:
+    #                     fasta_seqs: Dict[str, str] = self.extract_from_hdf(clique)
+    #                 else:
+    #                     fasta_seqs: Dict[str, str] = self.extract_from_fasta(clique)
+    #                 fasta_path: str = os.path.join(
+    #                     self.fasta_dir, f"batch{j}_clique{c}.fa"
+    #                 )
+    #                 with open(fasta_path, "w") as fp:
+    #                     for header, seq in fasta_seqs.items():
+    #                         fp.write(header + "\n" + seq + "\n")
+    #                 fasta_path = os.path.abspath(fasta_path)
+    #                 all_fasta_files.append(fasta_path)
+    #             with open(table_path, "w") as t:
+    #                 for fasta_file in all_fasta_files:
+    #                     t.write(fasta_file + "\n")
+    #             table_path = os.path.abspath(table_path)
+    #             res_path = os.path.abspath(res_path)
+    #             if self.container_image is not None:
+    #                 executor: str = f"{self.container_executor} run {{}} {{}} {{}} {FINE_RESOLVER_REL}"
+    #             else:
+    #                 executor: str = FINE_RESOLVER
+    #             cmd: str = (
+    #                 f"{executor} {table_path} {res_path} -t "
+    #                 f"-pb {self.prank_bin} -rb {self.tree_bin} "
+    #                 f"-rc {self.tree_cpus} -rs {self.tree_bootnum} "
+    #             )
+    #             if self.container_image is not None:
+    #                 if self.binding_map is not None:
+    #                     bind_key: str = CONTAINER_ENGINE2BIND_KEY[
+    #                         self.container_executor
+    #                     ]
+    #                     bindings: str = (
+    #                         self.bindings if self.bindings is not None else ""
+    #                     )
+    #                     for key, value in self.binding_map.items():
+    #                         if not value:
+    #                             continue
+    #                         cmd = cmd.replace(key, value)
+    #                     cmd = cmd.format(bind_key, bindings, self.container_image)
+    #                 else:
+    #                     cmd = cmd.format("", "", self.container_image)
+    #             job_path = os.path.abspath(job_path)
+    #             with open(job_path, "w") as jf:
+    #                 jf.write("\n".join(SPLIT_JOB_HEADER) + "\n")
+    #                 jf.write(cmd + "\n")
+    #             file_mode: bytes = os.stat(job_path).st_mode
+    #             file_mode |= (file_mode & 0o444) >> 2
+    #             os.chmod(job_path, file_mode)
+    #             jl.write(job_path + "\n")
 
-    def pick_representatives(self, clique: List[str]) -> List[str]:
+    def pick_representatives(self, clique: List[str], index: ProteinIndex) -> List[str]:
         """ """
         output_list: List[str] = []
         query_genes: List[str] = [x for x in clique if x in self.gene2tr_que]
@@ -1480,7 +1551,8 @@ class InitialOrthologyResolver(CommandLineManager):
                 all_projections.append(proj)
                 loss_status: str = self.loss_status.get(proj, N)
                 seq_id: str = f"{proj}_query"
-                seq: str = self.protein_index[seq_id].split("\n")[1].replace("-", "")
+                # seq: str = self.protein_index[seq_id].split("\n")[1].replace("-", "")
+                seq: str = index[seq_id]
                 prev_header, prev_seq = gene2longest.get(query_gene, ("", ""))
                 new_is_longer: bool = len(seq) > len(prev_seq)
                 same_length: bool = len(seq) == len(prev_seq)
@@ -1502,9 +1574,6 @@ class InitialOrthologyResolver(CommandLineManager):
                     gene2longest[query_gene] = (proj, seq)
                     gene2best_status[query_gene] = loss_status
                     gene2smallest_id[query_gene] = chain_id
-        # selected_isoforms: List[str] = [
-        #     v[0] for v in gene2longest.values()
-        # ]
         ref_genes: List[str] = [x for x in clique if x not in query_genes]
         ref_gene2longest: Dict[str, Tuple[str, str]] = {}
         ref_gene2best_status: Dict[str, str] = {}
@@ -1520,7 +1589,8 @@ class InitialOrthologyResolver(CommandLineManager):
                 chain_id: int = int(chain_id.split(",")[0])
                 loss_status: str = self.loss_status.get(proj, N)
                 seq_id: str = f"{proj}_ref"
-                seq: str = self.protein_index[seq_id].split("\n")[1].replace("-", "")
+                # seq: str = self.protein_index[seq_id].split("\n")[1].replace("-", "")
+                seq: str = index[seq_id]
                 prev_header, prev_seq = ref_gene2longest.get(ref_gene, ("", ""))
                 new_is_longer: bool = len(seq) > len(prev_seq)
                 same_length: bool = len(seq) == len(prev_seq)
@@ -1557,8 +1627,8 @@ class InitialOrthologyResolver(CommandLineManager):
         """
         if not self.jobs2cliques:
             return
-        self.protein_index: Dict[str, str] = self._load_protein_index()
-        with open(self.jobfile, "w") as jl:
+        # self.protein_index: Dict[str, str] = self._load_protein_index()
+        with open(self.jobfile, "w") as jl, ProteinHdfContext(self.fasta_file) as index:
             for j, cliques in self.jobs2cliques.items():
                 job_path: str = os.path.join(self.job_dir, f"batch{j}.ex")
                 table_path: str = os.path.join(self.fasta_dir, f"batch{j}.txt")
@@ -1569,7 +1639,7 @@ class InitialOrthologyResolver(CommandLineManager):
                     self._debug(
                         f"Writing FASTA input for clique {c} ({len(clique)} sequences)"
                     )
-                    fasta_seqs: List[str] = self.pick_representatives(clique)
+                    fasta_seqs: List[str] = self.pick_representatives(clique, index)
                     if all(len(x.split("\n")[1]) < 50 for x in fasta_seqs):
                         self._to_log(
                             (
@@ -1615,13 +1685,37 @@ class InitialOrthologyResolver(CommandLineManager):
                         t.write(fasta_file + "\n")
                 table_path = os.path.abspath(table_path)
                 res_path = os.path.abspath(res_path)
+                if self.container_image is not None:
+                    executor: str = f"{self.container_executor} run {{}} {{}} {{}} {FINE_RESOLVER_REL}"
+                else:
+                    executor: str = FINE_RESOLVER
                 cmd: str = (
-                    f"{FINE_RESOLVER} {table_path} {res_path} -t "
+                    f"{executor} {table_path} {res_path} -t "
                     f"-pb {self.prank_bin} -rb {self.tree_bin} "
                     f"-rc {self.tree_cpus} -rs {self.tree_bootnum} "
                 )
+                # cmd: str = (
+                #     f"{FINE_RESOLVER} {table_path} {res_path} -t "
+                #     f"-pb {self.prank_bin} -rb {self.tree_bin} "
+                #     f"-rc {self.tree_cpus} -rs {self.tree_bootnum} "
+                # )
                 if self.use_raxml:
                     cmd += " -raxml"
+                if self.container_image is not None:
+                    if self.binding_map is not None:
+                        bind_key: str = CONTAINER_ENGINE2BIND_KEY[
+                            self.container_executor
+                        ]
+                        bindings: str = (
+                            self.bindings if self.bindings is not None else ""
+                        )
+                        for key, value in self.binding_map.items():
+                            if not value:
+                                continue
+                            cmd = cmd.replace(key, value)
+                        cmd = cmd.format(bind_key, bindings, self.container_image)
+                    else:
+                        cmd = cmd.format("", "", self.container_image)
                 job_path = os.path.abspath(job_path)
                 ok_file: str = os.path.join(res_path, ".ok")
                 with open(job_path, "w") as jf:
