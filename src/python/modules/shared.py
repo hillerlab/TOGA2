@@ -625,11 +625,12 @@ def parse_one_column(file: Union[str, TextIO]) -> List[str]:
 def read_tab(file: str) -> Iterable[str]:
     """Read a TSV file line by line, yield a generator of field-split lines"""
     if type(file) is str:
-        opener: Callable[str] = (
-            gzip.open if (file.endswith(".gz") or file.endswith("gzip")) else open
-        )
+        gzipped: bool = file.endswith(".gz") or file.endswith("gzip")
+        opener: Callable[str] = gzip.open if gzipped else open
         with opener(file, "r") as h:
             for line in h:
+                if gzipped:
+                    line = line.decode("utf8")
                 data: List[str] = line.strip().split("\t")
                 if not data or not data[0]:
                     continue
