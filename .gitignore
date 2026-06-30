@@ -175,7 +175,7 @@ celerybeat.pid
 .env
 .envrc
 .venv
-!assets/venv
+!assets/venv/
 env/
 venv/
 ENV/
