@@ -29,6 +29,7 @@ from src.python.modules.cesar_wrapper_constants import (
 )
 from src.python.modules.codon_alignment import ALIGNERS_TO_USE, PRANK
 from src.python.modules.constants import TOGA2_EPILOG, Constants
+from src.python.modules.gxf import Gxf
 from src.python.modules.input_producer import (
     DEFAULT_MEMORY_LIMIT,
     MIN_INTRON_LENGTH_FOR_CLASSIFICATION,
@@ -1407,9 +1408,23 @@ def from_config(
 @mandatory.option(
     "--ref_annot",
     type=click.Path(exists=True),
-    metavar="REF_ANNOTATION_BED",
+    metavar="REF_ANNOTATION",
     cls=DependentOption,
     required=True,
+    help="""A path to the reference annotation file in BED, GTF, or GFF3 format. The default 
+expected format is BED, which can be changed with with the --annot_format flag. Note that 
+for GTF/GFF3 files, gene-to-isoform mapping is extracted from the input file, with no need for the 
+separate isoform file
+"""
+)
+@input_options.option(
+    "--annot_format",
+    "-f",
+    type=click.Choice(Gxf.ANNOT_FORMAT),
+    metavar="FORMAT",
+    default=Gxf.BED,
+    show_default=True,
+    help="Input annotation format. Available formats are: %s" % ", ".join(Gxf.ANNOT_FORMAT),
 )
 @input_options.option(
     "--ref_isoforms",
@@ -1454,28 +1469,41 @@ will be excluded from the annotation. Contigs appearing in both --contigs
 and --excluded_contigs are treated as excluded.""",
 )
 @input_options.option(
-    "--min_intron_legth",
-    type=str,
+    "--min_internal_exon_length",
+    "-min_e",
+    type=click.IntRange(min=0),
+    metavar="INT",
+    default=0,
+    show_default=True,
+    help="""Minimal internal (non-terminal) coding exon length. Reference transcripts containing 
+internal exons shorter than this value are removed from the annotation."""
+)
+@input_options.option(
+    "--min_intron_length",
+    "-min_e",
+    type=int,
     metavar="INT",
     default=0,
     show_default=True,
     help="""
-Minimal allowed coding sequence intron length; reference transcripts containing intorns shorter 
-than this value are removed from the annotation
-"""
+Minimal allowed coding sequence intron length. Reference transcripts containing introns shorter 
+than this value are removed from the annotation"""
 )
 @input_options.option(
-    "--stringent_nmd_filter",
-    type=str,
-    metavar="FLAG",
-    is_flag=True,
-    default=False,
+    "--nmd_filter_level",
+    type=click.IntRange(min=0, max=2),
+    metavar="LEVEL",
+    default=0,
     show_default=True,
-    help="""
-If set, nonsense-mediated decay (NMD) candidates are removed from the annotation as long as they suffice the 
-"55-base" rule (distance between CDS end and the first UTR intron exceeds 55 bases).
-Otherwise, coding sequences shorter than 100 bases and transcripts with CDS-UTR intron distance of <80 or >400 bases 
-are ignored by the NMD filter.
+    help="""Controls nonsense-mediated decay (NMD) candidate stringency:\n
+\t* If set to 0, NMD identification in the input annotation is disabled;\n
+\t* If set to 1, NMD candidates are removed from the annotation as long as the distance 
+between the stop codon and the last UTR exon-exon junction is greater than 80 bases and none 
+of the following conditions hold:\n
+\t\t* the coding sequence length is shorter than 100 bases;\n
+\t\t* distance between the CDS end and the first UTR-UTR intron is more than 400 bases;\n 
+\t* If set to 2, the CDS-last UTR-UTR junction distance threshold is set to 55, and none of 
+the two mitigating conditions above applies.
 """
 )
 @control_flow_options.option(
