@@ -8,16 +8,8 @@
   </p>
 
   <span>
-    <h6 align="center">
-        <pre>
-  MMP""MM""YMM   .g8""8q.     .g8"""bgd      db          `7MMF'`7MMF'
-  P'   MM   `7 .dP'    `YM. .dP'     `M     ;MM:           MM    MM  
-       MM     dM'      `MM dM'       `     ,V^MM.          MM    MM  
-       MM     MM        MM MM             ,M  `MM          MM    MM  
-       MM     MM.      ,MP MM.    `7MMF'  AbmmmqMA         MM    MM  
-       MM     `Mb.    ,dP' `Mb.     MM   A'     VML        MM    MM  
-     .JMML.     `"bmmd"'     `"bmmmdPY .AMA.   .AMMA.    .JMML..JMML.
-        </pre>
+    <h1 align="center">
+        TOGA2
     </h1>
   </span>
 
