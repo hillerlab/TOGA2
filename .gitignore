@@ -7,9 +7,10 @@ __pycache__/
 _toga2.py
 HL_resources/
 patch_scripts/
+conda/
+dev/
 extra/
 _extra/
-conda/
 _README.md
 _Makefile
 src/python/modules/final_orthology_aggregator_old.py

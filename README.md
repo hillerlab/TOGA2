@@ -3,33 +3,28 @@
 
 TOGA2: A faster, more versatile successor of Tool to infer Orthologs from Genome Alignments
 
-> [!IMPORTANT]  
-TOGA2 is currently in early access phase. This means, certain TOGA2 features and most of the documentation at TOGA2 wiki are currently missing and will be added in the following days. If you want to use the early access version and experience problems with installing or running code in this repository, please open an issue here or contact the TOGA2 team (yury.malovichko@senckenberg.de).
-
-
 ## Documentation
 Detailed explanations of all output files can be found in our
 [TOGA2 Wiki](https://github.com/hillerlab/TOGA2/wiki).
 
 ## Changelog
-### v2.0.8
+### v2.0.9
 * `run` mode:
-    * All eight CESAR2 profiles can be now provided as a single input directory with the `--cesar_profile_dir` argument.
-    * `--paralogs_over_spanning` flag for swapping annotation priority
-    * revised naming notation for one-to-many genes: addoitional copies for genes with more than 26 instances in the query get the binary letter suffix ('_aa', '_ab', etc.); genes with more than 300 orthologous copies lead to a hardcoded crash.
-    * `--debug` mode (early access) for increased logging verbosity
-    * Variable project argument formats (TSV, JSON, YAML).
-* **NEW MODE**: `summary` for concise run summary generation.
-* `from-config` mode:
-    * Support for all accepted config formats (TSV, JSON, YAML).
-* `spliceai` mode:
-    * Lifting the "early access" warning (see `Minor changes`)
-* `integrate` mode:
-    * Paralogs overlapping orthologous projections are now retained as long as they contain enough novel sequence compared to the rest of the projections in the locus.
-    * UTR-annotated input support
+    * Paralog annotation is now possible even for transcripts with existing orthologous chains with `--annotate_paralogs` flag. Paralogs annotated this way are retained only if they have loss status of at least *UL*, and no more than 5 paralogs with predicted orthologs per query locus are kept in the annotation.
 * `prepare-input` mode:
-    * Exon sequence .2bit file for SLEASY compatibility generated along with BED and isoforms files.
-    * File names are now prepended with an optional reference name prefix.
+    * Annotation and isoform file can be now generated from a GFF3/GTF file;
+    * Minimal intron length and nonsense-mediated decay (NMD) filters for reference transcripts;
+    * Minimal CDS intron length filter;
+    * Minimal internal (non-terminal) CDS exon length filter;
+    * Reference gene coordinates in BED format (`${ref}.toga.genes.bed`) now added to output;
+* `integrate` mode:
+    * Adding GTF format query annotation (`query_annotation.gtf.gz`) to output;
+    * Adding integration summary (`summary.txt`) to output;
+* **NEW MODE**: `orthogroups` enables orthogroup modelling and generates gene family files compatible with [CAFE5](https://github.com/hahnlab/CAFE5) input.
+* **NEW MODE**: `toga2agora` creates ordered lists of 1:1 orthologs across multuple runs compatible with the [AGORA](https://github.com/DyogenIBENS/Agora) tool for gene order and synteny analysis.
+* **NEW COMPANION SCRIPT**: `toga2stats` for assembly quality assessment based on the ancestral gene set.
+* Companion dataset:
+    * Adding input annotation for two turtle (*Emydura macquarii macquarii*, *Emys orbicularis*) and five percomoprh fishes (*Gasterosteus aculeatus*, *Hippoglossus stenolepis*, *Melanotaenia boesemani*, *Nothobranchius furzeri*, *Synchiropus splendidus*) reference species.
 
 For the full list of code changes, see [changelog.md](https://github.com/hillerlab/TOGA2/blob/main/changelog.md) .
 

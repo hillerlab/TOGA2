@@ -1,8 +1,46 @@
 ## v2.0.9
 * `run` mode:
+    * Paralog annotation is now possible even for transcripts with existing orthologous chains with `--annotate_paralogs` flag. Paralogs annotated this way are retained only if they have loss status of at least *UL*, and no more than 5 paralogs with predicted orthologs per query locus are kept in the annotation.
 * `prepare-input` mode:
-    * Annotation and isoform file generation from GFF3/GTF files;
-* **NEW MODE**: `orthogroups` enables orthogroup modelling and generates gene family files compatible with CAFE5 input;
+    * Annotation and isoform file can be now generated from a GFF3/GTF file;
+    * Minimal intron length and nonsense-mediated decay (NMD) filters for reference transcripts;
+    * Minimal CDS intron length filter;
+    * Minimal internal (non-terminal) CDS exon length filter;
+    * Reference gene coordinates in BED format (`${ref}.toga.genes.bed`) now added to output;
+* `integrate` mode:
+    * Adding GTF format query annotation (`query_annotation.gtf.gz`) to output;
+    * Adding integration summary (`summary.txt`) to output;
+* **NEW MODE**: `orthogroups` enables orthogroup modelling and generates gene family files compatible with [CAFE5](https://github.com/hahnlab/CAFE5) input.
+* **NEW MODE**: `toga2agora` creates ordered lists of 1:1 orthologs across multuple runs compatible with the [AGORA](https://github.com/DyogenIBENS/Agora) tool for gene order and synteny analysis.
+* **NEW COMPANION SCRIPT**: `toga2stats` for assembly quality assessment based on the ancestral gene set.
+* Companion dataset:
+    * Adding input annotation for two turtle (*Emydura macquarii macquarii*, *Emys orbicularis*) and five percomoprh fishes (*Gasterosteus aculeatus*, *Hippoglossus stenolepis*, *Melanotaenia boesemani*, *Nothobranchius furzeri*, *Synchiropus splendidus*) reference species.
+* Minor changes:
+    * `prepare-input` mode:
+        * Colon (":") symbol now accepted in gene/transcript names (also applies to `run` mode)
+    * `run` mode:
+        * `prepare_pseudogene_track.py`:
+            * Iterative re-implementation of DFS to obviate recursion stack overflow;
+            * Abbreviated names for loci with with more than three chains (first three chains followed by "+" symbol);
+        * `pairwise_fasta_to_hdf5`:
+            * Per-sequence dataset creation is replaced with writing sequences and their names as two distinct datasets; scales better in the presence of multiple sequences;
+        * `intron_gain_check.py`:
+            * Reference-absent intron annotation is aborted if the number of potential groups exceeds 50 at some point; a provisional safe measure against multiple intron gain/loss events (e.g., large retrogene in the reference annotation);
+        * `pairwise_fasta_to_hdf5.py`:
+            * Updated protein sequence HDF5 storage structure: removing sequence gaps and redundant protein sequences; name-to-sequence mapping is stored as three bulk Numpy arrays;
+        * `initial_orthology_resolver.py`:
+            * Undefined symbol filter (`is_undefined()`) now applies to sequences consisting of undefined ('X') amino acid symbols by 90% or more;
+            * Fixed the length check in `is_homopolymer()`;
+            * Updated HDF5 reading procedure to match the new storage structure;
+        * `cesar_job_scheduler.py`:
+            * Speeding up chimeric projection filter by running projection overlap sweep-line after all the projections are processed;
+        * `toga_main.py`:
+            * Speeding up alignment step results aggregation;
+    * `integrate` mode:
+        * `integrate.py`:
+            * fixed sequence name check for decorator files in `prepare_decorator_track()`;
+    * Companion dataset:
+        * Adding SLEASY 2bit exon files, GTF files, and gene BED files for all references.
 
 ## v2.0.8
 * `run` mode:
