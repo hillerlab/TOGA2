@@ -28,12 +28,23 @@ def dfs(
     """Performs a depth-first search over an adjacency dictionary of nodes"""
     if node not in graph:
         return component
-    visited.append(node)
-    component.append(node)
-    for adj_node in graph[node]:
-        if adj_node in visited:
+    # visited.append(node)
+    # component.append(node)
+    # for adj_node in graph[node]:
+    #     if adj_node in visited:
+    #         continue
+    #     component = dfs(graph, adj_node, visited, component)
+    stack: List[Any] = [node]
+    while stack:
+        curr_node: Any = stack.pop()
+        if curr_node in visited:
             continue
-        component = dfs(graph, adj_node, visited, component)
+        component.append(curr_node)
+        visited.append(curr_node)
+        for adj_node in graph[curr_node]:
+            if adj_node in visited:
+                continue
+            stack.append(adj_node)
     return component
 
 
@@ -227,7 +238,10 @@ class PseudogeneTrackBuilder(CommandLineManager):
                     comp_start: int = headers[first_proj][1]
                     comp_end: int = headers[last_proj][2]
                     comp_strand: str = headers[last_proj][3]
-                    name: str = f"{tr}#{','.join(current_component)}"
+                    if len(current_component) > 3:
+                        name: str = f"{tr}#{','.join(current_component[:3])}+"
+                    else:
+                        name: str = f"{tr}#{','.join(current_component)}"
                     bed_line: List[str] = [
                         chrom,
                         comp_start,

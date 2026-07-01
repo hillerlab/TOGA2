@@ -4,15 +4,17 @@
 
 import click
 import in_place
+import os
 import sys
 
-CHANGELOG: str = "changelog.md"
+
+CHANGELOG: str = os.path.join("assets", "changelog", "changelog.md")
 README: str = "README.md"
 VERSION_FILE: str = "__version__.py"
 VERSION_TEMPLATE: str = "__version__ = \"{}\""
 CHANGELOG_LINK_LINE: str = (
     "\nFor the full list of code changes, see "
-    "[changelog.md](https://github.com/hillerlab/TOGA2/blob/main/changelog.md) .\n"
+    "[changelog.md](https://github.com/hillerlab/TOGA2/blob/main/assets/changelog/changelog.md) .\n"
 )
 
 def remove_version_suffix(version: str) -> str:

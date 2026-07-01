@@ -85,11 +85,11 @@ install_binaries:
 	echo ${DELIM}
 
 install_python_packages:
-	python3 -m pip install -r requirements.txt; \
+	python3 -m pip install -r assets/requirements/requirements.txt; \
 	echo ${DELIM}
 
 install_python:
-	python3 -m pip install -r requirements.txt
+	python3 -m pip install -r assets/requirements/requirements.txt
 
 install_third_party:
 	python3 ${CHECK_DEPS} install_third_party

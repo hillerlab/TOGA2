@@ -29,6 +29,7 @@ from src.python.modules.cesar_wrapper_constants import (
 )
 from src.python.modules.codon_alignment import ALIGNERS_TO_USE, PRANK
 from src.python.modules.constants import TOGA2_EPILOG, Constants
+from src.python.modules.gxf import Gxf
 from src.python.modules.input_producer import (
     DEFAULT_MEMORY_LIMIT,
     MIN_INTRON_LENGTH_FOR_CLASSIFICATION,
@@ -157,6 +158,7 @@ integration_options: PrettyGroup = PrettyGroup(
 )
 out_options: PrettyGroup = PrettyGroup("Output")
 misc_options: PrettyGroup = PrettyGroup("Miscellaneous")
+qc_options: PrettyGroup = PrettyGroup("Quality Control")
 
 
 @click.group(context_settings=CONTEXT_SETTINGS, no_args_is_help=True)
@@ -164,7 +166,7 @@ misc_options: PrettyGroup = PrettyGroup("Miscellaneous")
 def toga2() -> None:
     """
     \b
-    MMP""MM""YMM   .g8""8q.     .g8\"""bgd      db          `7MMF'`7MMF'
+    MMP""MM""YMM   .g8""8q.    .g8\"""bgd      db          `7MMF'`7MMF'
     P'   MM   `7 .dP'    `YM. .dP'     `M     ;MM:           MM    MM
          MM     dM'      `MM dM'       `     ,V^MM.          MM    MM
          MM     MM        MM MM             ,M  `MM          MM    MM
@@ -506,6 +508,15 @@ from individual chains""",
     default=False,
     show_default=True,
     help="If set, only transcript with a single orthologous projection are considered",
+)
+@gene_select_options.option(
+    "--annotate_paralogs",
+    "-aP",
+    is_flag=True,
+    default=False,
+    show_default=True,
+    help="""If set, paralogous projections are considered for annotation 
+even in the presence of orthologous predictions""",
 )
 @gene_select_options.option(
     "--paralogs_over_spanning",
@@ -1300,7 +1311,7 @@ this name will be sought for in $PATH""",
 def run(**kwargs) -> None:
     """
     \b
-    MMP""MM""YMM   .g8""8q.     .g8\"""bgd      db          `7MMF'`7MMF'
+    MMP""MM""YMM   .g8""8q.    .g8\"""bgd      db          `7MMF'`7MMF'
     P'   MM   `7 .dP'    `YM. .dP'     `M     ;MM:           MM    MM
          MM     dM'      `MM dM'       `     ,V^MM.          MM    MM
          MM     MM        MM MM             ,M  `MM          MM    MM
@@ -1355,7 +1366,7 @@ def from_config(
 ) -> None:
     """
     \b
-    MMP""MM""YMM   .g8""8q.     .g8\"""bgd      db          `7MMF'`7MMF'
+    MMP""MM""YMM   .g8""8q.    .g8\"""bgd      db          `7MMF'`7MMF'
     P'   MM   `7 .dP'    `YM. .dP'     `M     ;MM:           MM    MM
          MM     dM'      `MM dM'       `     ,V^MM.          MM    MM
          MM     MM        MM MM             ,M  `MM          MM    MM
@@ -1397,9 +1408,23 @@ def from_config(
 @mandatory.option(
     "--ref_annot",
     type=click.Path(exists=True),
-    metavar="REF_ANNOTATION_BED",
+    metavar="REF_ANNOTATION",
     cls=DependentOption,
     required=True,
+    help="""A path to the reference annotation file in BED, GTF, or GFF3 format. The default 
+expected format is BED, which can be changed with with the --annot_format flag. Note that 
+for GTF/GFF3 files, gene-to-isoform mapping is extracted from the input file, with no need for the 
+separate isoform file
+"""
+)
+@input_options.option(
+    "--annot_format",
+    "-f",
+    type=click.Choice(Gxf.ANNOT_FORMAT),
+    metavar="FORMAT",
+    default=Gxf.BED,
+    show_default=True,
+    help="Input annotation format. Available formats are: %s" % ", ".join(Gxf.ANNOT_FORMAT),
 )
 @input_options.option(
     "--ref_isoforms",
@@ -1442,6 +1467,44 @@ will be excluded from the annotation.""",
 to exclude from the filtered annotation. Transcripts located in this contigs 
 will be excluded from the annotation. Contigs appearing in both --contigs 
 and --excluded_contigs are treated as excluded.""",
+)
+@input_options.option(
+    "--min_internal_exon_length",
+    "-min_e",
+    type=click.IntRange(min=0),
+    metavar="INT",
+    default=0,
+    show_default=True,
+    help="""Minimal internal (non-terminal) coding exon length. Reference transcripts containing 
+internal exons shorter than this value are removed from the annotation."""
+)
+@input_options.option(
+    "--min_intron_length",
+    "-min_e",
+    type=int,
+    metavar="INT",
+    default=0,
+    show_default=True,
+    help="""
+Minimal allowed coding sequence intron length. Reference transcripts containing introns shorter 
+than this value are removed from the annotation"""
+)
+@input_options.option(
+    "--nmd_filter_level",
+    type=click.IntRange(min=0, max=2),
+    metavar="LEVEL",
+    default=0,
+    show_default=True,
+    help="""Controls nonsense-mediated decay (NMD) candidate stringency:\n
+\t* If set to 0, NMD identification in the input annotation is disabled;\n
+\t* If set to 1, NMD candidates are removed from the annotation as long as the distance 
+between the stop codon and the last UTR exon-exon junction is greater than 80 bases and none 
+of the following conditions hold:\n
+\t\t* the coding sequence length is shorter than 100 bases;\n
+\t\t* distance between the CDS end and the first UTR-UTR intron is more than 400 bases;\n 
+\t* If set to 2, the CDS-last UTR-UTR junction distance threshold is set to 55, and none of 
+the two mitigating conditions above applies.
+"""
 )
 @control_flow_options.option(
     "--disable_intron_classification",
@@ -1544,7 +1607,7 @@ will be sought for in $PATH""",
 def prepare_input(**kwargs) -> None:
     """
     \b
-    MMP""MM""YMM   .g8""8q.     .g8\"""bgd      db          `7MMF'`7MMF'
+    MMP""MM""YMM   .g8""8q.    .g8\"""bgd      db          `7MMF'`7MMF'
     P'   MM   `7 .dP'    `YM. .dP'     `M     ;MM:           MM    MM
          MM     dM'      `MM dM'       `     ,V^MM.          MM    MM
          MM     MM        MM MM             ,M  `MM          MM    MM
@@ -1814,7 +1877,7 @@ log and metadata files""",
 def spliceai(**kwargs) -> None:
     """
     \b
-    MMP""MM""YMM   .g8""8q.     .g8\"""bgd      db          `7MMF'`7MMF'
+    MMP""MM""YMM   .g8""8q.    .g8\"""bgd      db          `7MMF'`7MMF'
     P'   MM   `7 .dP'    `YM. .dP'     `M     ;MM:           MM    MM
          MM     dM'      `MM dM'       `     ,V^MM.          MM    MM
          MM     MM        MM MM             ,M  `MM          MM    MM
@@ -1846,7 +1909,7 @@ def spliceai(**kwargs) -> None:
 def merge(**kwargs) -> None:
     """
     \b
-    MMP""MM""YMM   .g8""8q.     .g8\"""bgd      db          `7MMF'`7MMF'
+    MMP""MM""YMM   .g8""8q.    .g8\"""bgd      db          `7MMF'`7MMF'
     P'   MM   `7 .dP'    `YM. .dP'     `M     ;MM:           MM    MM
          MM     dM'      `MM dM'       `     ,V^MM.          MM    MM
          MM     MM        MM MM             ,M  `MM          MM    MM
@@ -1881,6 +1944,14 @@ by combining annotation with different references""",
     default=None,
     show_default=True,
     help="A path to a directory to save the results to",
+)
+@out_options.option(
+    "--query_name",
+    type=str,
+    metavar="QUERY_NAME",
+    default="query",
+    show_default=True,
+    help="Query assembly/species name to use in the summary file"
 )
 @integration_options.option(
     "--accepted_statuses",
@@ -2011,7 +2082,7 @@ and then for an available executable in $PATH""",
 def integrate(**kwargs) -> None:
     """
     \b
-    MMP""MM""YMM   .g8""8q.     .g8\"""bgd      db          `7MMF'`7MMF'
+    MMP""MM""YMM   .g8""8q.    .g8\"""bgd      db          `7MMF'`7MMF'
     P'   MM   `7 .dP'    `YM. .dP'     `M     ;MM:           MM    MM
          MM     dM'      `MM dM'       `     ,V^MM.          MM    MM
          MM     MM        MM MM             ,M  `MM          MM    MM
@@ -2149,6 +2220,17 @@ Relevant if PRANK aligner is selected""",
         "to check whether the found orthologs comply with this loss status. If not set, all projections listed "
         "in the orthology classification file are considered"
     ),
+)
+@loss_options.option(
+    "--use_one2zeros",
+    is_flag=True,
+    default=False,
+    show_default=True,
+    help=(
+        "If set, the best orthologous (i.e., non-paralogous, non-retrogene) projection "
+        "is used for transcripts rendered 1:0 in the query. If more than one projection corresponds to "
+        "the highest loss status, the query is excluded from the analysis as usual"
+    )
 )
 @aligner_options.option(
     "--aligner",
@@ -2298,7 +2380,7 @@ the executable will be sought for in PATH""",
 def sequence_alignment(**kwargs) -> None:
     """
     \b
-    MMP""MM""YMM   .g8""8q.     .g8\"""bgd      db          `7MMF'`7MMF'
+    MMP""MM""YMM   .g8""8q.    .g8\"""bgd      db          `7MMF'`7MMF'
     P'   MM   `7 .dP'    `YM. .dP'     `M     ;MM:           MM    MM
          MM     dM'      `MM dM'       `     ,V^MM.          MM    MM
          MM     MM        MM MM             ,M  `MM          MM    MM
@@ -2422,7 +2504,7 @@ def sequence_alignment(**kwargs) -> None:
 def postoga(**kwargs) -> None:
     """
     \b
-    MMP""MM""YMM   .g8""8q.     .g8\"""bgd      db          `7MMF'`7MMF'
+    MMP""MM""YMM   .g8""8q.     .g8\"""bgd     db          `7MMF'`7MMF'
     P'   MM   `7 .dP'    `YM. .dP'     `M     ;MM:           MM    MM
          MM     dM'      `MM dM'       `     ,V^MM.          MM    MM
          MM     MM        MM MM             ,M  `MM          MM    MM
@@ -2446,7 +2528,7 @@ def postoga(**kwargs) -> None:
 def cookbook() -> None:
     """
     \b
-    MMP""MM""YMM   .g8""8q.     .g8\"""bgd      db          `7MMF'`7MMF'
+    MMP""MM""YMM   .g8""8q.    .g8\"""bgd      db          `7MMF'`7MMF'
     P'   MM   `7 .dP'    `YM. .dP'     `M     ;MM:           MM    MM
          MM     dM'      `MM dM'       `     ,V^MM.          MM    MM
          MM     MM        MM MM             ,M  `MM          MM    MM
@@ -2492,6 +2574,29 @@ def summary(
     config: click.Path,
     config_format: Optional[str] = "tsv",
 ) -> None:
+    """
+    \b
+    MMP""MM""YMM   .g8""8q.     .g8\"""bgd     db          `7MMF'`7MMF'
+    P'   MM   `7 .dP'    `YM. .dP'     `M     ;MM:           MM    MM
+         MM     dM'      `MM dM'       `     ,V^MM.          MM    MM
+         MM     MM        MM MM             ,M  `MM          MM    MM
+         MM     MM.      ,MP MM.    `7MMF'  AbmmmqMA         MM    MM
+         MM     `Mb.    ,dP' `Mb.     MM   A'     VML        MM    MM
+       .JMML.     `"bmmd"'     `"bmmmdPY .AMA.   .AMMA.    .JMML..JMML.
+
+    \b
+    summary - Generate a concise summary of the TOGA2 run
+
+    \b
+    The only mandatory argument is the `--config` option that leads to a TOGA2 project_args_XXX file. 
+    File format can be toggled with `--config_format` option (YAML format by default starting from v2.0.8).
+    \b
+    The following files are expected to be present in the output directory under their default names:\n
+    \t* orthology_scores.tsv
+    \t* loss_summary.tsv
+    \t* query_genes.tsv
+    \t* orthology_classification.tsv
+    """
     from src.python.modules.results_checks import LogParserForSummary, SummaryStat
 
     kwargs: Dict[str, Any] = LogParserForSummary(config, config_format).extract_settings()
@@ -2529,6 +2634,292 @@ def test(output: Optional[click.Path]) -> None:
     # DEFAULT_ARGS["no_u12_file"]
     # DEFAULT_ARGS["no_isoform_file"] = True
     TogaMain(**DEFAULT_ARGS, cmd=cmd)
+
+
+@toga2.command(
+    context_settings=CONTEXT_SETTINGS,
+    no_args_is_help=True,
+    short_help="Build orthogroups from TOGA2 pairwise orthology annotations",
+)
+@mandatory.option(
+    "--toga_dir",
+    "-t",
+    type=click.Path(exists=True),
+    metavar="DIR",
+    cls=DependentOption,
+    required=True,
+    help="Directory with per-species TOGA2 output subdirectories",
+)
+@mandatory.option(
+    "--species_list",
+    "-s",
+    "species_list_path",
+    type=str,
+    metavar="LIST|FILE",
+    cls=DependentOption,
+    required=True,
+    help="Comma-separated species names or path to a file with one name per line",
+)
+@mandatory.option(
+    "--transcripts_bed",
+    "-b",
+    type=click.Path(exists=True),
+    metavar="FILE",
+    cls=DependentOption,
+    required=True,
+    help="Reference transcript BED file",
+)
+@mandatory.option(
+    "--isoforms",
+    "-i",
+    type=click.Path(exists=True),
+    metavar="FILE",
+    cls=DependentOption,
+    required=True,
+    help="TOGA2 isoforms file (gene-to-transcript mapping)",
+)
+@out_options.option(
+    "--output",
+    "-o",
+    "out_dir",
+    type=click.Path(exists=False),
+    metavar="DIR",
+    required=True,
+    help="Output directory",
+)
+@input_options.option(
+    "--panther",
+    type=click.Path(exists=True),
+    metavar="FILE",
+    default=None,
+    show_default=True,
+    help="PANTHER database flat file; if provided, enables PANTHER-guided family merging",
+)
+@control_flow_options.option(
+    "--force",
+    "-f",
+    is_flag=True,
+    default=False,
+    show_default=True,
+    help="Overwrite output files if they already exist",
+)
+@control_flow_options.option(
+    "--one-to-one",
+    is_flag=True,
+    default=False,
+    show_default=True,
+    help="Write per-reference-gene matrix with query gene name if single-copy (one2one_matrix.tsv)",
+)
+@misc_options.option(
+    "--blacklist",
+    "-bl",
+    type=str,
+    metavar="LIST|FILE",
+    default=None,
+    show_default=True,
+    help="Comma-separated chr/scaffold names to exclude, or path to a file with one name per line",
+)
+@misc_options.option(
+    "--size_filter",
+    "-sf",
+    type=int,
+    metavar="INT",
+    default=None,
+    show_default=True,
+    help="Remove gene families where any species has >= INT gene copies",
+)
+@misc_options.option(
+    "--include_ul",
+    "-ul",
+    is_flag=True,
+    default=False,
+    show_default=True,
+    help="Include UL (Uncertain Loss) transcripts when filtering by loss status",
+)
+@qc_options.option(
+    "--ortho_z",
+    type=float,
+    metavar="FLOAT",
+    default=3.0,
+    show_default=True,
+    help="OrthoZ threshold for orthogroup inflation detection (default: 3.0)",
+)
+@qc_options.option(
+    "--fam_z",
+    type=float,
+    metavar="FLOAT",
+    default=3.0,
+    show_default=True,
+    help="FamZ threshold for copy-number family outlier detection (default: 3.0)",
+)
+@qc_options.option(
+    "--no_qc",
+    is_flag=True,
+    default=False,
+    show_default=True,
+    help="Skip species QC diagnostics",
+)
+@verbosity_options.option(
+    "--verbose",
+    "-v",
+    is_flag=True,
+    default=False,
+    show_default=True,
+    help="Print per-species processing stats (enables DEBUG logging)",
+)
+def orthogroups(**kwargs) -> None:
+    """
+    \b
+    MMP""MM""YMM   .g8""8q.    .g8\"""bgd      db          `7MMF'`7MMF'
+    P'   MM   `7 .dP'    `YM. .dP'     `M     ;MM:           MM    MM
+         MM     dM'      `MM dM'       `     ,V^MM.          MM    MM
+         MM     MM        MM MM             ,M  `MM          MM    MM
+         MM     MM.      ,MP MM.    `7MMF'  AbmmmqMA         MM    MM
+         MM     `Mb.    ,dP' `Mb.     MM   A'     VML        MM    MM
+       .JMML.     `"bmmd"'     `"bmmmdPY .AMA.   .AMMA.    .JMML..JMML.
+
+    \b
+    orthogroups - Build orthogroups from TOGA2 pairwise orthology annotations.
+
+    \b
+    Constructs orthogroups by modelling (reference_gene - query_gene) orthology
+    relationships as a graph and extracting connected components with Union-Find.
+    Optionally merges with PANTHER family assignments for broader family grouping.
+
+    \b
+    Output files (written to --output directory):
+      orthogroups_matrix.tsv  — copy-number count table (CAFE5-compatible)
+      orthogroups_map.tsv     — full orthogroup membership per family
+      one2one_matrix.tsv      — per-ref-gene matrix with single-copy query gene names (optional)
+    """
+    from src.python.modules.toga2orthogroups import run as _run
+
+    _log = logging.getLogger("src.python.modules.toga2orthogroups")
+    _handler = logging.StreamHandler()
+    _handler.setFormatter(logging.Formatter("%(message)s"))
+    _log.addHandler(_handler)
+    _log.propagate = False
+    if kwargs.pop("verbose", False):
+        _log.setLevel(logging.DEBUG)
+    _run(**kwargs)
+
+
+@toga2.command(
+    context_settings=CONTEXT_SETTINGS, 
+    no_args_is_help=True,
+    short_help="Prepare AGORA input from multiple TOGA2 pairwise annotation"
+)
+@mandatory.option(
+    "--input_directory",
+    type=click.Path(exists=True),
+    metavar="INPUT_DIR",
+    required=True,
+    default=None,
+    show_default=True,
+    help="Path to the input TOGA2 directory; see help message header for more details",
+)
+@mandatory.option(
+    "--tree",
+    type=click.Path(exists=True),
+    metavar="TREE",
+    required=True,
+    default=None,
+    show_default=True,
+    help="Path to the input phylogenetic tree in Newick format, see help message header for more details"
+)
+@mandatory.option(
+    "--reference",
+    type=str,
+    metavar="REF_NAME",
+    required=True,
+    default=None,
+    show_default=True,
+    help="""Reference assembly name. The same name must appear in the input directory 
+and in the phylogenetic tree; see help message header for more details 
+"""
+)
+@input_options.option(
+    "--annotation",
+    "-a",
+    type=str,
+    metavar="ANNOT_NAME",
+    default="currentAnnotation",
+    show_default=True,
+    help="""Reference annotation directory name; gene names and coordinates 
+will be fetched from ${INPUT_DIR}/${ANNOT_NAME} contents""",
+)
+@input_options.option(
+    "--min_chrom_size",
+    "-min",
+    type=click.IntRange(min=0, max=None),
+    metavar="INT",
+    default=0,
+    show_default=True,
+    help="Minimal chromosome size to consider"
+)
+@out_options.option(
+    "--output",
+    "-o",
+    type=click.Path(exists=False),
+    default=None,
+    show_default=False,
+    help="Path to the output directory [default: toga2agora_${hex_code}]"
+)
+@verbosity_options.option(
+    "--verbose", "-v", is_flag=True, default=False, help="Control logging verbosity"
+)
+@verbosity_options.option(
+    "--debug",
+    is_flag=True,
+    default=False,
+    show_default=True,
+    help="""Increase logging verbosity by logging debugging messages. 
+Automatically enables \"--verbose\" flag""",
+)
+def toga2agora(**kwargs) -> None:
+    """
+    \b
+    MMP""MM""YMM   .g8""8q.    .g8\"""bgd      db          `7MMF'`7MMF'
+    P'   MM   `7 .dP'    `YM. .dP'     `M     ;MM:           MM    MM
+         MM     dM'      `MM dM'       `     ,V^MM.          MM    MM
+         MM     MM        MM MM             ,M  `MM          MM    MM
+         MM     MM.      ,MP MM.    `7MMF'  AbmmmqMA         MM    MM
+         MM     `Mb.    ,dP' `Mb.     MM   A'     VML        MM    MM
+       .JMML.     `"bmmd"'     `"bmmmdPY .AMA.   .AMMA.    .JMML..JMML.
+
+    \b
+    toga2agora - Prepare AGORA input from multiple TOGA2 pairwise annotation
+    WARNING: This module is currently under development. Alternative input configuration options might be added in the future
+
+    \b
+    Mandatory arguments are:
+    *INPUT_DIR* is the path to the master directory of the following structure:
+        * reference
+            * TOGA2
+                * *ANNOTATION*
+                    * ${REF_NAME}.toga.genes.bed
+                * vs_query1
+                * vs_query2
+                * ...
+                * vs_queryN
+        * query1
+            * chrom.sizes
+        * query2
+            * chrom.sizes
+        * ...
+        * queryN
+            * chrom.sizes
+    *TREE* is a path to the phylogenetic tree in Newick format. All leaves are expected to be named after the reference/query directories in *INPUT_DIR*
+    *REF_NAME* is reference species names; the same name is expected to be used in both the tree and the *INPUT_DIR* structure.
+
+    \b
+    Output directory has the following structure:
+    * `genes` - a directory with ordered gene names lists in AGORA-compatible format (chromosome-start-end-strand-gene);
+    * `orthology_groups` - a directory with ancestral nodes' gene lists;
+    * `AGORA_tree.nwk` - a labeled version of the input tree; each internal node is named after its immediate descendants
+    """
+    from src.python.modules.toga2agora import Toga2Agora
+    Toga2Agora(**kwargs)
 
 
 if __name__ == "__main__":

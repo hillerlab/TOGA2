@@ -53,6 +53,7 @@ DEFAULT_ARGS: Dict[str, Union[str, int, float, bool, None]] = {
     "orthologs_only": False,
     "one2ones_only": False,
     "paralogs_over_spanning": False,
+    "annotate_paralogs": False,
     "enable_spanning_chains": False,
     "annotate_processed_pseudogenes": False,
     "preprocessing_jobs": 300,

@@ -3,13 +3,14 @@ Reference input annotation preparation functionality
 """
 
 __author__ = "Yury V. Malovichko"
-__credits__ = "Michael Hiller"
+__credits__ = ("Michael Hiller", "Bernhard Bein")
 __year__ = "2025"
 
 import logging
 import os
 from collections import defaultdict
 from contextlib import nullcontext
+from enum import IntEnum
 from shutil import which
 from typing import Dict, List, Optional, Set, Tuple, Union
 
@@ -17,7 +18,15 @@ import click
 
 from .constants import Headers, RejectionReasons
 from .filter_ref_bed import consistent_name
-from .shared import CommandLineManager, dir_name_by_date, get_upper_dir, hex_dir_name
+from .gxf import Gxf
+from .shared import (
+    CommandLineManager,
+    dir_name_by_date,
+    get_upper_dir,
+    hex_dir_name,
+    intersection,
+    read_tab,
+)
 
 logging.root.handlers = []
 
@@ -52,6 +61,10 @@ TYPE_ID: str = "type_id"
 DEFAULT_CLASS_COL: int = 12
 
 
+GENE_BED_LINE: str = "{chrom}\t{start}\t{end}\t{name}\t1000\t{strand}\n"
+BED_LINE: str = "{chrom}\t{start}\t{end}\t{name}\t0\t{strand}\t{cds_start}\t{cds_end}\t0,0,0,\t{exon_num}\t{sizes}\t{starts}\n"
+ISOFORM_LINE: str = "{gene}\t{tr}\n"
+
 TOGA2_ROOT: str = get_upper_dir(__file__, 4)
 DEFAULT_TWOBITTOFA: str = os.path.join(TOGA2_ROOT, "bin", "twoBitToFa")
 DEFAULT_BED2FRACTION: str = os.path.join(
@@ -68,10 +81,16 @@ BED12TO6_ERR: str = "BED12 to BED6 conversion failed:"
 TRANSCRIPTS: str = "toga.transcripts.bed"
 ISOFORMS: str = "toga.isoforms.tsv"
 U12_FILE: str = "toga.U12introns.bed"
+GENE_BED: str = "toga.genes.bed"
+IMMUNE_BED: str = "toga.immunoglobulins.bed"
+IMMUNE_ISOFORMS: str = "toga.immunoglobulin_isoforms.tsv"
+IMMUNE_GENE_BED: str = "toga.immunoglobulin_genes.bed"
 SLEASY: str = "sleasy.exons.2bit"
 REJ_LOG: str = "rejected_items.tsv"
 EXON_BED6: str = "all_exons.bed6"
 FA_FOR_SLEASY: str = "all_exons.fasta"
+PROV_BED: str = "transcripts.from_gxf.raw.bed"
+PROV_ISOFORM: str = "isoforms.from_gxf.raw.bed"
 
 ATTR2BIN: Dict[str, str] = {
     "twobittofa_binary": "twoBitToFa",
@@ -90,6 +109,13 @@ BIN2DEFAULT: Dict[str, str] = {
 }
 
 
+class NmdConstants:
+    STOP_JUNCTION_DIST: int = 55
+    WEAK_STOP_JUNCTION_DIST: int = 80
+    START_STOP_DIST: int = 100
+    BIG_EXON_JUNCTION_DIST: int = 400
+
+
 def add_prefix(template: str, prefix: Optional[Union[str, None]] = "") -> str:
     """Adds a prefix to the output file name
 
@@ -105,6 +131,12 @@ def add_prefix(template: str, prefix: Optional[Union[str, None]] = "") -> str:
     return f"{prefix}.{template}"
 
 
+class IsNMD(IntEnum):
+    NO = 0
+    WEAK = 1
+    STRONG = 2
+
+
 class InputProducer(CommandLineManager):
     """
     Main class for input annotation preparation
@@ -117,18 +149,27 @@ class InputProducer(CommandLineManager):
         "isoforms",
         "disable_intron_classification",
         "disable_cesar_profiles",
+        "annot_format",
         "output",
         "contigs",
         "excluded_contigs",
+        "min_int_exon_length",
+        "min_intron_length",
+        "nmd_level",
         "intronic_cores",
         "filtered_annotation",
         "filtered_isoforms",
         "sleasy_2bit",
+        "gene_bed",
+        "immune_annotation",
+        "immune_isoforms",
+        "immune_gene_bed",
         "rejection_log",
         "bed6_exons",
         "fasta_for_sleasy",
         "tr2annot",
         "rejected_transcripts",
+        "immune",
         "rejected_lines",
         "intronic",
         "ic_cores",
@@ -139,6 +180,8 @@ class InputProducer(CommandLineManager):
         "tmp_dir",
         "intron_file",
         "all_intron_bed",
+        "provisional_bed",
+        "provisional_isoforms",
         "min_intron_length_intronic",
         "min_intron_length_cesar",
         "intron2class",
@@ -146,18 +189,120 @@ class InputProducer(CommandLineManager):
         "profiles",
         "profile_dir",
         "keep_tmp",
+        "tr2coords",
     )
+
+    @staticmethod
+    def nmd_filter(
+        thin_start: int,
+        thin_end: int,
+        cds_start: int,
+        cds_end: int,
+        sizes: List[int],
+        starts: List[int],
+        strand: bool,
+    ) -> IsNMD:
+        """
+        Filter nonsense-mediated decay (NMD) targets from the final annotation.
+
+        The logic goes as follows:
+            1. The code tracks the distance between the end of the coding sequence
+            and the last (first if the strand is negative) UTR-UTR exon junction.
+            In practical terms this means all exons past the CDS end up to N-1 exon
+            included (or all exons before the CDS start starting from the second
+            in case of the negative strand).
+
+            2. Cumulative UTR length in this interval is recorded and compared to
+            the threshold value (55 bases by default, according to the "55 bp rule");
+
+            3. If 3'-UTR region contains at least one exon junction (=intron), and
+            the distance between the end of the coding sequence and the first UTR
+            exon junction is more than 55 bp, the exon is considered a potential NMD target;
+
+            4. The following conditions might hinder NMD, so fulfilling either of them
+            downgrades the evidence for NMD to the "weak evidence" category:
+                * CDS-UTR junction distance is below 80 nucleotides (relaxed "55 bp rule");
+                * Stop-containing exon consists of both CDS and UTR, and the UTR
+                sequence is at least 400 bases long;
+                * Coding sequence is shorter than 100 bases.
+
+        Args:
+            * thin_start: int - sequence start in the genome, including UTRs;
+            * thin_end: int - sequence end in the genome, including UTRs;
+            * cds_start: int - coding sequence start in the genome;
+            * cds_end: int - coding sequence end in the genome;
+            * sizes: List[int] - list of exon sizes (BED12 field 11);
+            * sizes: List[int] - list of exon relative start coordinates (BED12 field 12);
+            * strand: bool - True if strand is positive.
+
+        Returns:
+            * enum IsNMD:
+                * 0 (NO) if transcript is not an NMD target;
+                * 1 (WEAK) if evidence for NMD is considered tentative;
+                * 2 (STRONG) if there is enough evidence for NMD targeting for the transcript.
+        """
+        junction_counter: int = 0
+        cds_length: int = 0
+        utr_length: int = 0
+        distance_to_utr_junction: int = 0
+        exon_num: int = len(sizes)
+        for (
+            i,
+            start,
+        ) in enumerate(starts):
+            exon_start: int = thin_start + start
+            exon_end: int = exon_start + sizes[i]
+            ## add the coding portion's length to the total CDS length
+            exon_cds_start: int = max(cds_start, exon_start)
+            exon_cds_end: int = min(cds_end, exon_end)
+            length: int = exon_cds_end - exon_cds_start
+            cds_length += length if length >= 0 else 0
+            ## ignore coding/g'-UTR exons
+            if (strand and exon_end < cds_end) or (
+                not strand and exon_start > cds_start
+            ):
+                continue
+            if not distance_to_utr_junction:
+                if strand and exon_start < cds_end < exon_end:
+                    distance_to_utr_junction = exon_end - exon_cds_end
+                elif not strand and exon_start < cds_start < exon_end:
+                    distance_to_utr_junction = exon_cds_start - exon_start
+            if not ((strand and i == exon_num - 1) or (not strand and i == 0)):
+                if strand:
+                    utr_length += exon_end - max(exon_start, cds_end)
+                else:
+                    utr_length += min(exon_end, cds_start) - exon_start
+                junction_counter += 1
+        status: int = IsNMD.NO
+        if junction_counter > 0 and utr_length > NmdConstants.STOP_JUNCTION_DIST:
+            ## "big exon condition": UTR part of the CDS:UTR exon is bigger than the threshold value
+            big_exon: bool = (
+                distance_to_utr_junction >= NmdConstants.BIG_EXON_JUNCTION_DIST
+            )
+            ## start codon proximity: stop codon is within first 100 coding bases
+            short_cds: bool = cds_length <= NmdConstants.START_STOP_DIST
+            ## distance to the last UTR junction is <= 80 bp
+            short_distance: int = utr_length <= NmdConstants.WEAK_STOP_JUNCTION_DIST
+            if big_exon or short_cds or short_distance:
+                status = IsNMD.WEAK
+            else:
+                status = IsNMD.STRONG
+        return status
 
     def __init__(
         self,
         ref_2bit: click.Path,
         ref_annot: click.Path,
+        annot_format: Optional[str] = Gxf.BED,
         ref_isoforms: Optional[click.Path] = None,
         output: Optional[Union[click.Path, None]] = None,
         prefix: Optional[str] = "",
         disable_transcript_filtering: Optional[bool] = False,
         contigs: Optional[Union[str, None]] = None,
         excluded_contigs: Optional[Union[str, None]] = None,
+        min_internal_exon_length: Optional[int] = 0,
+        min_intron_length: Optional[int] = 0,
+        nmd_filter_level: Optional[bool] = 0,
         disable_intron_classification: Optional[bool] = False,
         disable_cesar_profiles: Optional[bool] = False,
         intronic_binary: Optional[Union[click.Path, None]] = None,
@@ -173,11 +318,24 @@ class InputProducer(CommandLineManager):
         self.v: bool = True
         self.set_logging()
 
+        if annot_format != Gxf.BED and ref_isoforms is not None:
+            self._die(
+                (
+                    "Ref annotation format was set to %i, which is incompatible "
+                    "with the external isoform mapping. Please remove the isoform file "
+                    "from the settings or provide a BED annotation file instead. "
+                ) % annot_format
+            )
+
         self.twobit: click.Path = ref_2bit
         self.annot: click.Path = ref_annot
         self.isoforms: Union[click.Path, None] = ref_isoforms
         self.contigs: Union[str, None] = contigs
         self.excluded_contigs: Union[str, None] = excluded_contigs
+        self.min_int_exon_length: int = min_internal_exon_length
+        self.min_intron_length: int = min_intron_length
+        self.nmd_level: bool = nmd_filter_level
+        self.annot_format: str = annot_format
         self.disable_intron_classification: bool = disable_intron_classification
         self.disable_cesar_profiles: bool = disable_cesar_profiles
         self.min_intron_length_intronic: int = min_intron_length_intronic
@@ -194,8 +352,20 @@ class InputProducer(CommandLineManager):
         self.filtered_isoforms: os.PathLike = os.path.join(
             self.output, add_prefix(ISOFORMS, prefix)
         )
+        self.gene_bed: os.PathLike = os.path.join(
+            self.output, add_prefix(GENE_BED, prefix)
+        )
         self.sleasy_2bit: os.PathLike = os.path.join(
             self.output, add_prefix(SLEASY, prefix)
+        )
+        self.immune_annotation: str = os.path.join(
+            self.output, add_prefix(IMMUNE_BED, prefix)
+        )
+        self.immune_isoforms: str = os.path.join(
+            self.output, add_prefix(IMMUNE_ISOFORMS, prefix)
+        )
+        self.immune_gene_bed: str = os.path.join(
+            self.output, add_prefix(IMMUNE_GENE_BED, prefix)
         )
         self.rejection_log: str = os.path.join(self.output, REJ_LOG)
 
@@ -206,6 +376,9 @@ class InputProducer(CommandLineManager):
             self.output, add_prefix(U12_FILE, prefix)
         )
         self.all_intron_bed: os.PathLike = os.path.join(self.tmp_dir, "all_introns.bed")
+        self.provisional_bed: str = os.path.join(self.tmp_dir, PROV_BED)
+        self.provisional_isoforms: str = os.path.join(self.tmp_dir, PROV_ISOFORM)
+
 
         self.twobittofa_binary: Union[os.PathLike, None] = twobittofa_binary
         self.fatotwobit_binary: Union[os.PathLike, None] = fatotwobit_binary
@@ -214,8 +387,10 @@ class InputProducer(CommandLineManager):
         self.intronic_cores: int = intronic_cores
 
         self.tr2annot: Dict[str, str] = {}
-        self.rejected_transcripts: List[str] = []
+        self.rejected_transcripts: Set[str] = set()
+        self.immune: Set[str] = set()
         self.rejected_lines: List[str] = []
+        self.tr2coords: Dict[str, Tuple[str, int, int, bool]] = {}
 
         self.run()
 
@@ -229,11 +404,15 @@ class InputProducer(CommandLineManager):
         self._to_log("Creating output directory")
         self._mkdir(self.output)
         self._mkdir(self.tmp_dir)
+        ## step 0: if output is GTF/GFF3, extract the data from the file
+        if self.annot_format != Gxf.BED:
+            self._to_log("Extracting the annotation data from the GTF/GFF3 file")
+            self.from_gxf()
         ## step 1: annotation file check
         self._to_log("Refining the reference annotation BED file")
         self.check_annotation()
         ## step 2, optional: isoform file check, potential further annotation filtering
-        if self.isoforms is not None:
+        if self.isoforms is not None or self.annot_format != Gxf.BED:
             self._to_log("Refining the input isoform file")
             self.check_isoforms()
         ## write the results for steps 1 and 2
@@ -354,6 +533,146 @@ class InputProducer(CommandLineManager):
                 % (exp_name, exp_name)
             )
 
+    def from_gxf(self) -> None:
+        """
+        Prepares annotation from a GTF/GFF3 file
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        from .gxf import GxfTranscript, parse_gxf_attrs
+
+        tr_objects: Dict[str, GxfTranscript] = {}
+        for i, data in enumerate(read_tab(self.annot), start=1):
+            if len(data) < 9:
+                self._to_log(
+                    "Less than nine fields encountered in the GXF file at line %i" % i,
+                    "warning",
+                )
+            if data[0].startswith("#"):
+                continue
+            chrom: str = data[0]
+            level: str = data[2]
+            strand: bool = data[6] == "+"
+            attrs: Dict[str, str] = parse_gxf_attrs(
+                data[8], gff3=(self.annot_format == Gxf.GFF3)
+            )
+            biotype: Union[str, None] = Gxf.get_biotype(attrs)
+            # gene_id: str = attrs.get(Gxf.GENE_ID, "")
+            tr_id: str = attrs.get(Gxf.TR_ID, "")
+            tr_id = Gxf.remove_tr_prefices(tr_id)
+            if not tr_id:
+                continue
+            parent: str = Gxf.get_exon_parent(attrs)
+            ## check the item's  biotype
+            if biotype in Gxf.CODING_TAGS or level == Gxf.CDS:
+                ## messenger RNA transcript
+                is_coding: bool = True
+            elif biotype in Gxf.VDJ_TAGS:
+                ## IG fragment
+                is_coding: bool = False
+            else:
+                ## neither a protein-coding entity nor an immune gene fragment;
+                ## proceed further
+                continue
+            start: int = int(data[3]) - 1  ## GXF is 1-based, BED is 0-based
+            end: int = int(data[4])
+            if level == Gxf.TRANSCRIPT:
+                gene: str = Gxf.get_transcript_parent(attrs)
+                tr_obj: GxfTranscript = GxfTranscript(
+                    chrom,
+                    start,
+                    end,
+                    strand,
+                    tr_id,
+                    gene,
+                    is_coding,
+                )
+                tr_objects[tr_id] = tr_obj
+            if level not in Gxf.EXON_TYPES:
+                continue
+            parent: str = Gxf.get_exon_parent(attrs)
+            ## an orphan exon encountered; continue
+            if not parent or parent not in tr_objects:
+                continue
+            ## update transcript coding sequence boundaries
+            if level == Gxf.CDS:
+                if tr_objects[parent].cds_start is None:
+                    tr_objects[parent].cds_start = start
+                else:
+                    tr_objects[parent].cds_start = min(
+                        tr_objects[parent].cds_start, start
+                    )
+                if tr_objects[parent].cds_end is None:
+                    tr_objects[parent].cds_end = end
+                else:
+                    tr_objects[parent].cds_end = max(tr_objects[parent].cds_end, end)
+            ## add the exon to the coding sequence
+            e: int = 0
+            while e < len(tr_objects[parent].exons):
+                prev_start, prev_end = tr_objects[parent].exons[e]
+                if intersection(start, end, prev_start, prev_end) >= 0:
+                    tr_objects[parent].exons.pop(e)
+                    start, end = min(start, prev_start), max(end, prev_end)
+                    continue
+                e += 1
+            tr_objects[parent].exons.append((start, end))
+            tr_objects[parent].exons.sort(key=lambda x: (x[0], x[1]))
+            # prev_start, prev_end = tr_objects[parent].exons.pop(-1)
+            # if intersection(start, end, prev_start, prev_end) >= 0:
+            #     tr_objects[parent].exons.append(
+            #         (min(start, prev_start), max(end, prev_end))
+            #     )
+            # else:
+            #     tr_objects[parent].exons.extend(((prev_start, prev_end), (start, end)))
+        with (
+            open(self.provisional_bed, "w") as bed,
+            open(self.provisional_isoforms, "w") as iso,
+            # open(self.provisional_immune_bed, "w") as i_bed,
+            # open(self.proivisional_immune_isoforms, "w") as i_iso,
+        ):
+            for tr_obj in tr_objects.values():
+                sizes: List[str] = []
+                starts: List[str] = []
+                count: int = 0
+                for e_start, e_end in tr_obj.exons:
+                    start: str = str(e_start - tr_obj.start)
+                    size: str = str(e_end - e_start)
+                    starts.append(start)
+                    sizes.append(size)
+                    count += 1
+                sizes: str = ",".join(sizes) + ","
+                starts: str = ",".join(starts) + ","
+                strand: str = "+" if tr_obj.strand else "-"
+                name: str = f"{tr_obj.name}#{tr_obj.parent}"
+                if not tr_obj.is_coding:
+                    cds_start: int = tr_obj.start if tr_obj.cds_start is None else tr_obj.cds_start
+                    cds_end: int = tr_obj.start if tr_obj.cds_end is None else tr_obj.cds_end
+                else:
+                    cds_start: int = tr_obj.cds_start
+                    cds_end: int = tr_obj.cds_end
+                    if cds_start is None or cds_end is None:
+                        continue
+                    self.immune.add(name)
+                bed_line: str = BED_LINE.format(
+                    chrom=tr_obj.chrom,
+                    start=tr_obj.start,
+                    end=tr_obj.end,
+                    name=name,
+                    strand=strand,
+                    cds_start=cds_start,
+                    cds_end=cds_end,
+                    exon_num=count,
+                    sizes=sizes,
+                    starts=starts,
+                )
+                bed.write(bed_line)
+                iso_line: str = ISOFORM_LINE.format(gene=tr_obj.parent, tr=name)
+                iso.write(iso_line)
+
     def check_annotation(self) -> None:
         """
         Filters reference annotation by the following criteria:
@@ -361,92 +680,134 @@ class InputProducer(CommandLineManager):
         """
         ## TODO: Ideally copy the code here and modify as needed;
         ## a bit of silly code repetition, but at least no need to parse the rejection log
-        illegal_name: List[str] = []
-        rejected_contigs: List[str] = []
-        non_coding: List[str] = []
-        out_of_frame: List[str] = []
-        with open(self.annot, "r") as h:
-            for i, line in enumerate(h, start=1):
-                line = line.strip()
-                data: List[str] = line.split("\t")
-                if not data or not data[0]:
-                    continue
-                if len(data) != 12:
+        illegal_name: Set[str] = set()
+        rejected_contigs: Set[str] = set()
+        non_coding: Set[str] = set()
+        short_exons: Set[str] = set()
+        short_introns: Set[str] = set()
+        out_of_frame: Set[str] = set()
+        nmd_targets: Set[str] = set()
+        annot_input: str = (
+            self.provisional_bed if self.annot_format != Gxf.BED else self.annot
+        )
+        for i, data in enumerate(read_tab(annot_input), start=1):
+            if len(data) != 12:
+                self._die(
+                    (
+                        "Improper formatting at reference annotation file line %i; "
+                        "expected 12 fields, got %i"
+                    )
+                    % (i, len(data))
+                )
+            if any(x.strip() == "" for x in data):
+                self._die(
+                    (
+                        "Improper formatting at reference annotation file line %i; "
+                        "empty fields encountered"
+                    )
+                    % i
+                )
+            for field in NUMERIC_FIELDS:
+                if not data[field].replace(",", "").isdigit():
                     self._die(
                         (
                             "Improper formatting at reference annotation file line %i; "
-                            "expected 12 fields, got %i"
+                            "field %i contains non-numeric data"
                         )
-                        % (i, len(data))
+                        % (i, field)
                     )
-                if any(x.strip() == "" for x in data):
-                    self._die(
-                        (
-                            "Improper formatting at reference annotation file line %i; "
-                            "empty fields encountered"
-                        )
-                        % i
+            name: str = data[3]
+            is_coding: bool = name in self.immune
+            line = "\t".join(data)
+            ## remove the transcripts with improperly formatted names
+            if not consistent_name(name):
+                illegal_name.add(name)
+                continue
+            chrom: str = data[0]
+            ## if entries were restricted to specific contigs,
+            ## apply the respective filters
+            if self.contigs and chrom not in self.contigs:
+                rejected_contigs.add(name)
+                continue
+            if self.excluded_contigs and chrom in self.excluded_contigs:
+                rejected_contigs.add(name)
+                continue
+            ## check coding sequence presence and frame intactness
+            thin_start: int = int(data[1])
+            thin_end: int = int(data[2])
+            strand: bool = data[5] == "+"
+            cds_start: int = int(data[6])
+            cds_end: int = int(data[7])
+            if cds_end < cds_start:
+                self._die(
+                    (
+                        "Improper formatting at reference annotation file line %i; "
+                        "coding sequence start coordinate greated than the start coordinate"
                     )
-                for field in NUMERIC_FIELDS:
-                    if not data[field].replace(",", "").isdigit():
-                        self._die(
-                            (
-                                "Improper formatting at reference annotation file line %i; "
-                                "field %i contains non-numeric data"
-                            )
-                            % (i, field)
-                        )
-                name: str = data[3]
-                ## remove the transcripts with improperly formatted names
-                if not consistent_name(name):
-                    illegal_name.append(name)
-                    continue
-                chrom: str = data[0]
-                ## if entries were restricted to specific contigs,
-                ## apply the respective filters
-                if self.contigs and chrom not in self.contigs:
-                    rejected_contigs.append(name)
-                    continue
-                if self.excluded_contigs and chrom in self.excluded_contigs:
-                    rejected_contigs.append(name)
-                    continue
-                ## check coding sequence presence and frame intactness
-                thin_start: int = int(data[1])
-                # thin_end: int = int(data[2])
-                cds_start: int = int(data[6])
-                cds_end: int = int(data[7])
-                if cds_end < cds_start:
-                    self._die(
-                        (
-                            "Improper formatting at reference annotation file line %i; "
-                            "coding sequence start coordinate greated than the start coordinate"
-                        )
-                    )
-                if cds_start == cds_end:
-                    non_coding.append(name)
-                    continue
-                ## iterate over exon entries to infer the CDS length
-                frame_length: int = 0
-                sizes: List[int] = [int(x) for x in data[10].split(",") if x]
-                starts: List[int] = [int(x) for x in data[11].split(",") if x]
-                for start, size in zip(starts, sizes):
-                    start += thin_start
-                    end: int = start + size
-                    if start < cds_start:
-                        if end > cds_start:
-                            size -= cds_start - start
-                        else:
-                            continue
-                    if end > cds_end:
-                        if start < cds_end:
-                            size -= end - cds_end
-                        else:
-                            continue
-                    frame_length += size
-                if frame_length % 3:  # and not self.no_frame_filter:
-                    out_of_frame.append(name)
-                    continue
-                self.tr2annot[name] = line
+                )
+            if cds_start == cds_end:
+                non_coding.add(name)
+                continue
+            ## iterate over exon entries to infer the CDS length
+            frame_length: int = 0
+            sizes: List[int] = [int(x) for x in data[10].split(",") if x]
+            starts: List[int] = [int(x) for x in data[11].split(",") if x]
+            flawed: bool = False
+            if self.nmd_level != IsNMD.NO and is_coding:
+                nmd_status: int = self.nmd_filter(
+                    thin_start,
+                    thin_end,
+                    cds_start,
+                    cds_end,
+                    sizes,
+                    starts,
+                    strand,
+                )
+                if nmd_status == IsNMD.STRONG or (
+                    nmd_status == IsNMD.WEAK and self.nmd_level == IsNMD.STRONG
+                ):
+                    nmd_targets.add(name)
+                    flawed = True
+            has_short_exons: bool = False
+            prev_end: Union[int, None] = None
+            has_short_introns: bool = False
+            for ex, (start, size) in enumerate(zip(starts, sizes)):
+                start += thin_start
+                end: int = start + size
+                if start < cds_start:
+                    if end > cds_start:
+                        size -= cds_start - start
+                    else:
+                        continue
+                if end > cds_end:
+                    if start < cds_end:
+                        size -= end - cds_end
+                    else:
+                        continue
+                if size < self.min_int_exon_length and not (start <= cds_start or end >= cds_end):
+                    print(f"{name=}, {start=}, {end=}, {cds_end=}")
+                    has_short_exons = True
+                frame_length += size
+                if prev_end is not None:
+                    intron_size: int = start - prev_end
+                    if intron_size < self.min_intron_length:
+                        has_short_introns = True
+                prev_end = end
+            if has_short_exons and is_coding:
+                short_exons.add(name)
+                flawed = True
+            if has_short_introns and is_coding:
+                short_introns.add(name)
+                flawed = True
+            if frame_length % 3:  # and not self.no_frame_filter:
+                out_of_frame.add(name)
+                flawed = True
+            if flawed:
+                continue
+            self.tr2annot[name] = line
+            self.tr2coords[name] = (data[0], cds_start, cds_end, strand)
+
+        ## report the discarded items
         if illegal_name:
             self._to_log(
                 (
@@ -456,7 +817,7 @@ class InputProducer(CommandLineManager):
                 % "\n\t".join(illegal_name),
                 "warning",
             )
-            self.rejected_transcripts.extend(illegal_name)
+            self.rejected_transcripts.update(illegal_name)
             self.rejected_lines.extend(
                 [RejectionReasons.NAME_REJ_REASON.format(x) for x in illegal_name]
             )
@@ -469,7 +830,7 @@ class InputProducer(CommandLineManager):
                 % "\n\t".join(rejected_contigs),
                 "warning",
             )
-            self.rejected_transcripts.extend(rejected_contigs)
+            self.rejected_transcripts.update(rejected_contigs)
             self.rejected_lines.extend(
                 [RejectionReasons.CONTIG_REJ_REASON.format(x) for x in rejected_contigs]
             )
@@ -482,9 +843,40 @@ class InputProducer(CommandLineManager):
                 % "\n\t".join(non_coding),
                 "warning",
             )
-            self.rejected_transcripts.extend(non_coding)
+            self.rejected_transcripts.update(non_coding)
             self.rejected_lines.extend(
                 [RejectionReasons.NON_CODING_REJ_REASON.format(x) for x in non_coding]
+            )
+        if short_exons:
+            self._to_log(
+                (
+                    "The following transcripts were filtered out because they have "
+                    "short (<%i bp) internal exons: %s"
+                )
+                % (self.min_int_exon_length, "\n\t".join(short_exons)),
+                "warning",
+            )
+            self.rejected_transcripts.update(short_exons)
+            self.rejected_lines.extend(
+                [RejectionReasons.SHORT_EXON_REASON.format(x) for x in short_exons]
+            )
+        if short_introns:
+            self._to_log(
+                (
+                    "The following transcripts were filtered out because they have "
+                    "short (<%i bp) CDS introns: %s"
+                )
+                % (self.min_intron_length, "\n\t".join(short_introns)),
+                "warning",
+            )
+            self.rejected_transcripts.update(short_introns)
+            self.rejected_lines.extend(
+                [
+                    RejectionReasons.SHORT_INTRON_REASON.format(
+                        x, self.min_intron_length
+                    )
+                    for x in short_introns
+                ]
             )
         if out_of_frame:
             self._to_log(
@@ -495,9 +887,22 @@ class InputProducer(CommandLineManager):
                 % "\n\t".join(out_of_frame),
                 "warning",
             )
-            self.rejected_transcripts.extend(out_of_frame)
+            self.rejected_transcripts.update(out_of_frame)
             self.rejected_lines.extend(
                 [RejectionReasons.FRAME_REJ_REASON.format(x) for x in out_of_frame]
+            )
+        if nmd_targets:
+            self._to_log(
+                (
+                    "The following transcripts were filtered out "
+                    "as potential nonsense-mediated decay targets:\n%s"
+                )
+                % "\n\t".join(nmd_targets),
+                "warning",
+            )
+            self.rejected_transcripts.update(nmd_targets)
+            self.rejected_lines.extend(
+                [RejectionReasons.NMD_REASON.format(x) for x in nmd_targets]
             )
         ## proceed further
 
@@ -512,36 +917,79 @@ class InputProducer(CommandLineManager):
         """
         gene2trs: Dict[str, List[str]] = {}
         trs_found: Set[str] = set()
-        with open(self.isoforms, "r") as h:
-            for i, line in enumerate(h, start=1):
-                data: List[str] = line.rstrip().split("\t")
-                if not data or not data[0]:
-                    continue
-                if len(data) != 2:
-                    self._die(
-                        (
-                            "Improper formatting at isoforms file line %i; "
-                            "expecting 2 columns, got %i"
-                        )
-                        % (i, len(data))
+        iso_file: str = self.isoforms if self.annot_format == Gxf.BED else self.provisional_isoforms
+        for i, data in enumerate(read_tab(iso_file), start=1):
+            if len(data) != 2:
+                self._die(
+                    (
+                        "Improper formatting at isoforms file line %i; "
+                        "expecting 2 columns, got %i"
                     )
-                gene, tr = data
-                if gene not in gene2trs:
-                    gene2trs[gene] = []
-                if tr in self.rejected_transcripts:
-                    continue
-                gene2trs[gene].append(tr)
-                trs_found.add(tr)
+                    % (i, len(data))
+                )
+            gene, tr = data
+            if gene not in gene2trs:
+                gene2trs[gene] = []
+            if tr in self.rejected_transcripts:
+                continue
+            gene2trs[gene].append(tr)
+            trs_found.add(tr)
         rejected_genes: List[str] = []
 
         ## write the remaining isoforms to the output file
-        with open(self.filtered_isoforms, "w") as h:
+        with (
+            open(self.filtered_isoforms, "w") as iso, 
+            open(self.gene_bed, "w") as bed,
+            open(self.immune_isoforms, "w") as i_iso,
+            open(self.immune_gene_bed, "w") as i_bed
+        ):
             for gene, trs in gene2trs.items():
                 if not trs:
                     rejected_genes.append(gene)
                     continue
+                chrom: Union[str, None] = None
+                start: Union[int, None] = None
+                end: Union[int, None] = None
+                strand: Union[bool, None] = None
+                immune: bool = False
                 for tr in trs:
-                    h.write(f"{gene}\t{tr}\n")
+                    if tr in self.immune:
+                        i_iso.write(f"{gene}\t{tr}\n")
+                        immune = True
+                    else:
+                        iso.write(f"{gene}\t{tr}\n")
+                    _chrom, _start, _end, _strand = self.tr2coords[tr]
+                    if chrom is None:
+                        chrom = _chrom
+                    elif chrom != _chrom:
+                        self._die(
+                            "Conflicting chromosomes encountered for gene %s: %s and %s"
+                            % (gene, chrom, _chrom)
+                        )
+                    if start is None:
+                        start = _start
+                    else:
+                        start = min(start, _start)
+                    if end is None:
+                        end = _end
+                    else:
+                        end = max(end, _end)
+                    if strand is None:
+                        strand = _strand
+                    else:
+                        if strand != _strand:
+                            self._die("Conflicting strand encountered for gene %s" % gene)
+                gene_bed_line: str = GENE_BED_LINE.format(
+                    chrom=chrom,
+                    start=start,
+                    end=end,
+                    name=gene,
+                    strand=("+" if strand else "-"),
+                )
+                if immune:
+                    i_bed.write(gene_bed_line)
+                else:
+                    bed.write(gene_bed_line)
 
         ## report genes which ended up having no transcripts
         if rejected_genes:
@@ -551,7 +999,7 @@ class InputProducer(CommandLineManager):
                     "isoforms file because all the respective "
                     "transcripts were removed from the annotation:\n\t%s"
                 )
-                % "\n\t".join(rejected_genes),
+                % "\n\t".join(map(str, rejected_genes)),
                 "warning",
             )
             self.rejected_lines.extend(
@@ -566,9 +1014,9 @@ class InputProducer(CommandLineManager):
                 (
                     "The following transcripts were removed from the "
                     "annotation because they were not mapped to any gene "
-                    "in the isoform file"
+                    "in the isoform file:\n%s"
                 )
-                % "\n\t".join(rejected_transcripts),
+                % "\n\t".join(map(str, rejected_transcripts)),
                 "warning",
             )
             self.rejected_lines.extend(
@@ -583,9 +1031,15 @@ class InputProducer(CommandLineManager):
         if not self.tr2annot:
             self._die("All transcripts were filtered out for various reasons")
         self._to_log("Writing the filtered annotation to %s" % self.filtered_annotation)
-        with open(self.filtered_annotation, "w") as h:
-            for line in self.tr2annot.values():
-                h.write(line + "\n")
+        with (
+            open(self.filtered_annotation, "w") as h,
+            open(self.immune_annotation, "w") as ih
+        ):
+            for name, line in self.tr2annot.items():
+                if name in self.immune:
+                    ih.write(line + "\n")
+                else:
+                    h.write(line + "\n")
 
     def write_rejection_log(self) -> None:
         """Writes the rejected items to the file"""
@@ -602,7 +1056,7 @@ class InputProducer(CommandLineManager):
 
         self._to_log("Writing temporary BED6 file")
         bed6_cmd: str = (
-            f"{self.bed2fraction_binary} -i {self.annot} -m cds -b | "
+            f"{self.bed2fraction_binary} -i {self.filtered_annotation} -m cds -b | "
             "sort -k4,4 -k5,5n | "
             f"awk -F'\t' '{{print $1,$2,$3,$4\"_exon\"$5,$5,$6}}' > {self.bed6_exons}"
         )
@@ -690,7 +1144,7 @@ class InputProducer(CommandLineManager):
         self._to_log("Extracting the unique coding introns")
         raw_intron_file: str = os.path.join(self.tmp_dir, "raw_introns.bed")
         intron_bed_cmd: str = (
-            f"{self.bed2fraction_binary} -i {self.annot} -o {raw_intron_file} "
+            f"{self.bed2fraction_binary} -i {self.filtered_annotation} -o {raw_intron_file} "
             "-m cds -n -b"
         )
         _ = self._exec(intron_bed_cmd, "Intron Bed6 extraction failed:")
@@ -734,7 +1188,11 @@ class InputProducer(CommandLineManager):
                     )
                 name: str = data[3].split(";")[0]
                 ## convert the probability into a Bed-compatible score
-                score: int = 0 if (data[4] == "." or data[4] == "NA") else int(float(data[4]) * 10)
+                score: int = (
+                    0
+                    if (data[4] == "." or data[4] == "NA")
+                    else int(float(data[4]) * 10)
+                )
                 # intron2coords[name] = f'{data[0]}\t{data[1]}\t{data[2]}\t{{}}\t{score}\t{data[5]}'
                 intron2coords[name] = (
                     data[0],
@@ -946,7 +1404,7 @@ class InputProducer(CommandLineManager):
             pos: int = i + start_pos
             if i >= len(seq):
                 for nuc in NUCS:
-                    self.profile[key][pos][nuc] + 1
+                    self.profiles[key][pos][nuc] += 1
                 continue
             nuc: str = seq[i]
             if nuc == N:

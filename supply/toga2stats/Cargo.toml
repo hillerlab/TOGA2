@@ -1,0 +1,16 @@
+[package]
+name = "toga2_stats"
+version = "0.0.3"
+edition = "2024"
+
+[dependencies]
+clap = { version = "4.0", features = ["derive"] }
+simple_logger = { version = "5.0.0" }
+log = { version = "0.4.14" }
+num_cpus = "1.16.0"
+rayon = "1.8.1"
+dashmap = { version = "6", features = ["rayon"] }
+
+[profile.release]
+lto = true
+opt-level = 3

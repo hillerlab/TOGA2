@@ -1,37 +1,67 @@
-# TOGA2
-<img src="https://github.com/hillerlab/TOGA2/blob/develop/wiki/LOGO_TOGA2.png" width="350">
+<p align="center">
+  <p align="center">
+    <img width=200 align="center" src="./wiki/LOGO_TOGA2.png" >
+  </p>
 
-TOGA2: A faster, more versatile successor of Tool to infer Orthologs from Genome Alignments
+  <p align="center">
+    <img width=200 align="center" src="./wiki/hillerlab.png" >
+  </p>
 
-> [!IMPORTANT]  
-TOGA2 is currently in early access phase. This means, certain TOGA2 features and most of the documentation at TOGA2 wiki are currently missing and will be added in the following days. If you want to use the early access version and experience problems with installing or running code in this repository, please open an issue here or contact the TOGA2 team (yury.malovichko@senckenberg.de).
+  <span>
+    <h1 align="center">
+        TOGA2
+    </h1>
+  </span>
 
+  <p align="center">
+    <a href="https://github.com/hillerlab/TOGA2" reference="_blank">
+      <img alt="GitHub License" src="https://img.shields.io/github/license/hillerlab/TOGA2?color=blue">
+    </a>
+  </p>
+
+  <p align="center">
+    <samp>
+        <span> TOGA2: A faster, more versatile successor of Tool to infer Orthologs from Genome Alignments </span>
+        <br>
+        <span> The Hiller Lab at the Senckenberg Research Institute </span>
+        <br>
+        <br>
+        <a href="https://github.com/hillerlab/TOGA2/wiki">docs</a> .
+        <a href="https://github.com/hillerlab/TOGA2?tab=readme-ov-file#Installation">install</a> .
+        <a href="https://hillerlab.com/">us</a> 
+    </samp>
+  </p>
+
+</p>
+
+---
 
 ## Documentation
 Detailed explanations of all output files can be found in our
 [TOGA2 Wiki](https://github.com/hillerlab/TOGA2/wiki).
 
-## Changelog
-### v2.0.8
-* `run` mode:
-    * All eight CESAR2 profiles can be now provided as a single input directory with the `--cesar_profile_dir` argument.
-    * `--paralogs_over_spanning` flag for swapping annotation priority
-    * revised naming notation for one-to-many genes: addoitional copies for genes with more than 26 instances in the query get the binary letter suffix ('_aa', '_ab', etc.); genes with more than 300 orthologous copies lead to a hardcoded crash.
-    * `--debug` mode (early access) for increased logging verbosity
-    * Variable project argument formats (TSV, JSON, YAML).
-* **NEW MODE**: `summary` for concise run summary generation.
-* `from-config` mode:
-    * Support for all accepted config formats (TSV, JSON, YAML).
-* `spliceai` mode:
-    * Lifting the "early access" warning (see `Minor changes`)
-* `integrate` mode:
-    * Paralogs overlapping orthologous projections are now retained as long as they contain enough novel sequence compared to the rest of the projections in the locus.
-    * UTR-annotated input support
-* `prepare-input` mode:
-    * Exon sequence .2bit file for SLEASY compatibility generated along with BED and isoforms files.
-    * File names are now prepended with an optional reference name prefix.
+---
 
-For the full list of code changes, see [changelog.md](https://github.com/hillerlab/TOGA2/blob/main/changelog.md) .
+## Changelog
+### v2.0.9
+* `run` mode:
+    * Paralog annotation is now possible even for transcripts with existing orthologous chains with `--annotate_paralogs` flag. Paralogs annotated this way are retained only if they have loss status of at least *UL*, and no more than 5 paralogs with predicted orthologs per query locus are kept in the annotation.
+* `prepare-input` mode:
+    * Annotation and isoform file can be now generated from a GFF3/GTF file;
+    * Minimal intron length and nonsense-mediated decay (NMD) filters for reference transcripts;
+    * Minimal CDS intron length filter;
+    * Minimal internal (non-terminal) CDS exon length filter;
+    * Reference gene coordinates in BED format (`${ref}.toga.genes.bed`) now added to output;
+* `integrate` mode:
+    * Adding GTF format query annotation (`query_annotation.gtf.gz`) to output;
+    * Adding integration summary (`summary.txt`) to output;
+* **NEW MODE**: `orthogroups` enables orthogroup modelling and generates gene family files compatible with [CAFE5](https://github.com/hahnlab/CAFE5) input.
+* **NEW MODE**: `toga2agora` creates ordered lists of 1:1 orthologs across multuple runs compatible with the [AGORA](https://github.com/DyogenIBENS/Agora) tool for gene order and synteny analysis.
+* **NEW COMPANION SCRIPT**: `toga2stats` for assembly quality assessment based on the ancestral gene set.
+* Companion dataset:
+    * Adding input annotation for two turtle (*Emydura macquarii macquarii*, *Emys orbicularis*) and five percomoprh fishes (*Gasterosteus aculeatus*, *Hippoglossus stenolepis*, *Melanotaenia boesemani*, *Nothobranchius furzeri*, *Synchiropus splendidus*) reference species.
+
+For the full list of code changes, see [changelog.md](https://github.com/hillerlab/TOGA2/blob/main/assets/changelog/changelog.md) .
 
 ## Installation
 
@@ -59,7 +89,7 @@ As an alternative to Python virtual environment, you can also use Conda for envi
 ```bash
 git clone --recurse-submodules https://github.com/hillerlab/TOGA2
 cd TOGA2
-conda env create -f conda.yaml
+conda env create -f assets/venv/conda.yaml
 conda activate toga2
 make
 ```
@@ -82,6 +112,8 @@ you should see the TOGA2 start menu.
 
 >[!NOTE]
 > The image provided in `supply/` directory contains the latest TOGA2 release, third-party software used for input preparation and TOGA2 annotation, and Nextflow for parallel process management. The container, however, does <ins>not</ins> contain any Nextflow-compatible parallel job executor. To set up your container for batch manager compatibility, see README at `supply/containers` and example recipe at `supply/containters/apptainer_slurm.def`
+
+---
 
 ## Running TOGA2
 If activated without additional arguments (`toga2.py`), the following start screen is displayed in the user's terminal:
@@ -115,6 +147,8 @@ Commands:
   test                Test TOGA2 with companion dataset
 ```
 Except for `toga2.py test`, invoking any of the listed commands without arguments also displays the help message. You can also invoke help message for TOGA2 or any of its commands with `--help/-h` option.
+
+---
 
 ## Test run
 To ensure that TOGA2 was installed properly, run the following command:
