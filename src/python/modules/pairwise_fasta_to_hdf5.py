@@ -63,7 +63,6 @@ class FastaToHdf5Converter(CommandLineManager):
         self,
         input: click.File,
         output: click.Path,
-        exon_fasta: Optional[bool],
         log_name: Optional[str],
         verbose: Optional[bool],
     ) -> None:
@@ -155,17 +154,17 @@ class FastaToHdf5Converter(CommandLineManager):
             # )
             f.create_dataset(
                 "name",
-                data=array([k for k, _ in sorted_items], dtype=object),
+                data=array([k for k, _ in sorted_items], dtype=dt),
                 dtype=dt,
             )
             f.create_dataset(
                 "seq_num",
-                data=array([v for _, v in sorted_items], dtype=object),
+                data=array([v for _, v in sorted_items], dtype=int32),
                 dtype=int32,
             )
             f.create_dataset(
                 "seq",
-                data=array([k for k, _ in sorted_seqs]),
+                data=array([k for k, _ in sorted_seqs], dtype=dt),
                 dtype=dt,
             )
             f.attrs["sorted"] = True
