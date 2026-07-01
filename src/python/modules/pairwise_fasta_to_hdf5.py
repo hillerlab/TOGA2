@@ -9,7 +9,7 @@ from typing import Dict, List, Tuple, Optional, TextIO
 import click
 import h5py
 from numpy import array, int32
-from .shared import CONTEXT_SETTINGS, CommandLineManager, get_proj2trans
+from .shared import CONTEXT_SETTINGS, CommandLineManager
 
 HEADER_START: str = ">"
 REFERENCE: str = "REFERENCE"
@@ -121,8 +121,8 @@ class FastaToHdf5Converter(CommandLineManager):
                 source: str = (
                     REF_SOURCE if header_split[2] == REFERENCE else QUERY_SOURCE
                 )
-                if source == REF_SOURCE:
-                    proj = get_proj2trans(proj)[0]
+                # if source == REF_SOURCE:
+                #     proj = get_proj2trans(proj)[0]
                 hdf5_id = f"{proj}{source}"
             else:
                 seq_parts.append(line)
