@@ -12,28 +12,30 @@ from math import ceil
 
 from pathlib import Path
 from shutil import which
-from typing import Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 import click
 import networkx as nx
 from modules.constants import (
-    CONTAINER_ENGINE2BIND_KEY, PRE_CLEANUP_LINE, RejectionReasons
+    CONTAINER_ENGINE2BIND_KEY,
+    PRE_CLEANUP_LINE,
+    RejectionReasons,
 )
 from modules.cesar_wrapper_constants import (
-    DEF_BLOSUM_FILE, 
+    DEF_BLOSUM_FILE,
     MIN_PROJ_OVERLAP_THRESHOLD,
-    HG38_CANON_U2_ACCEPTOR, 
+    HG38_CANON_U2_ACCEPTOR,
     HG38_CANON_U2_DONOR,
-    FIRST_ACCEPTOR, 
-    LAST_DONOR
+    FIRST_ACCEPTOR,
+    LAST_DONOR,
 )
 from modules.shared import (
-    CONTEXT_SETTINGS, 
+    CONTEXT_SETTINGS,
     SPLIT_JOB_HEADER,
-    CommandLineManager, 
+    CommandLineManager,
     get_connected_components,
-    get_upper_dir, 
-    intersection, 
+    get_upper_dir,
+    intersection,
 )
 
 __author__ = "Yury V. Malovichko"
@@ -44,9 +46,9 @@ __year__ = "2024"
 TOGA2_ROOT: str = get_upper_dir(__file__, 4)
 LOCATION: str = os.path.dirname(os.path.abspath(__file__))
 PARENT: str = os.sep.join(LOCATION.split(os.sep)[:-1])
-CESAR_WRAPPER_SCRIPT: str = os.path.join(PARENT, 'cesar_exec.py')
+CESAR_WRAPPER_SCRIPT: str = os.path.join(PARENT, "cesar_exec.py")
 CESAR_WRAPPER_SCRIPT_REL: str = os.path.join(
-    *PARENT.split(os.sep)[-2:], 'cesar_exec.py'
+    *PARENT.split(os.sep)[-2:], "cesar_exec.py"
 )
 
 BLOSUM_FILE: str = os.path.join(TOGA2_ROOT, *DEF_BLOSUM_FILE)
@@ -59,8 +61,21 @@ LAST_DONOR: str = os.path.join(TOGA2_ROOT, *LAST_DONOR)
 OK: str = ".ok"
 TOUCH: str = "touch {file}"
 
+
 @dataclass
 class ProjectionMeta:
+    __slots__ = (
+        "name",
+        "chain",
+        "chrom",
+        "start",
+        "end",
+        "max_mem",
+        "sum_mem",
+        "path",
+        "is_paralog",
+        "is_ppgene",
+    )
     name: str
     chain: str
     chrom: str
@@ -76,6 +91,27 @@ class ProjectionMeta:
         if self.end == other.end:
             return self.start < other.start
         return self.end < other.end
+
+    def __hash__(self) -> Tuple[Any, ...]:
+        return hash(
+            (
+                self.name,
+                self.chain,
+                self.start,
+                self.end,
+                self.max_mem,
+                self.sum_mem,
+                self.path,
+                self.is_paralog,
+                self.is_ppgene,
+            )
+        )
+
+    def __eq__(self, other: Any) -> bool:
+        return (isinstance(other, type(self))) and (
+            all(self.x == other.x for x in self.__slots__)
+        )
+
 
 def fragmented_projection(chain_id: str) -> bool:
     return "," in chain_id
@@ -426,33 +462,33 @@ def fragmented_projection(chain_id: str) -> bool:
     ),
 )
 @click.option(
-    '--container_image',
+    "--container_image",
     type=click.Path(exists=True),
     default=None,
     show_default=True,
     help=(
-        'A path to the executable TOGA2 container image. '
-        'All the parallel step scripts will be executed by invoking this container. '
-    )
+        "A path to the executable TOGA2 container image. "
+        "All the parallel step scripts will be executed by invoking this container. "
+    ),
 )
 @click.option(
-    '--container_executor',
+    "--container_executor",
     type=str,
-    default='apptainer',
+    default="apptainer",
     show_default=True,
-    help='A name for container executor engine'
+    help="A name for container executor engine",
 )
 @click.option(
-    '--bindings',
+    "--bindings",
     type=str,
     metavar="STRING",
     default=None,
     show_default=True,
     help=(
-        'A list of directory mounts to provide to the container instances at parallel steps. '
-        'Binginds should be provided as expected by the container executor engine and wrapped in '
+        "A list of directory mounts to provide to the container instances at parallel steps. "
+        "Binginds should be provided as expected by the container executor engine and wrapped in "
         'quotes, e.g. "/tmp,/src/,~/:/home"'
-    )
+    ),
 )
 ## benchmarking-related - REMOVE IN THE FINAL VERSION
 @click.option(
@@ -490,11 +526,9 @@ def fragmented_projection(chain_id: str) -> bool:
     default=False,
     show_default=True,
     help=""""Increases execution verbosity for debugging purpose; 
-automatically set the --verbose flag on"""
+automatically set the --verbose flag on""",
 )
-
 class CesarScheduler(CommandLineManager):
-
     """Schedules CESAR alignment module jobs"""
 
     __slots__ = [
@@ -533,9 +567,9 @@ class CesarScheduler(CommandLineManager):
         "correct_short_introns",
         "ignore_alternative_frame",
         "save_cesar_input",
-        "container_image", 
-        "container_executor", 
-        "bindings", 
+        "container_image",
+        "container_executor",
+        "bindings",
         "binding_map",
         "v",
         "proj2max_mem",
@@ -776,11 +810,19 @@ class CesarScheduler(CommandLineManager):
                 and proj in self.processed_pseudogene_list
             )
             proj_is_paralog: bool = (
-                self.paralog_list is not None and 
-                proj in self.paralog_list
+                self.paralog_list is not None and proj in self.paralog_list
             )
             entry: ProjectionMeta = ProjectionMeta(
-                proj, chain, chrom, start, stop, max_mem, sum_mem, path, proj_is_paralog, proj_is_ppgene,
+                proj,
+                chain,
+                chrom,
+                start,
+                stop,
+                max_mem,
+                sum_mem,
+                path,
+                proj_is_paralog,
+                proj_is_ppgene,
             )
             raw_items[(tr, chrom)].append(entry)
             # if (
@@ -858,7 +900,9 @@ class CesarScheduler(CommandLineManager):
                 # if debug and art_nodes:
                 #     print(f'The following nodes are likely chimeric: {[x.name for x in art_nodes]}')
                 for art_node in art_nodes:
-                    rej_reason: Tuple[str] = RejectionReasons.CHIMERIC_ENTRY.format(art_node.name)
+                    rej_reason: Tuple[str] = RejectionReasons.CHIMERIC_ENTRY.format(
+                        art_node.name
+                    )
                     self.rejected_transcripts.append(rej_reason)
                 comp.remove_nodes_from(art_nodes)
                 subcliques: List[nx.Graph] = get_connected_components(comp)
@@ -899,7 +943,9 @@ class CesarScheduler(CommandLineManager):
                             self.proj2sum_mem[proj_] = node.sum_mem
                             self.proj2storage[proj_] = node.path
                         else:
-                            rej_reason: Tuple[str] = RejectionReasons.REDUNDANT_ENTRY.format(proj_)
+                            rej_reason: Tuple[str] = (
+                                RejectionReasons.REDUNDANT_ENTRY.format(proj_)
+                            )
                             self.rejected_transcripts.append(rej_reason)
 
     def allocate_job_numbers(self) -> None:
@@ -954,7 +1000,9 @@ class CesarScheduler(CommandLineManager):
                         memory_buckets["big"].append((proj, max_mem))
                         self.heavy_job_max_mem = max(self.heavy_job_max_mem, max_mem)
                     else:
-                        rej_reason: Tuple[str] = RejectionReasons.HEAVY_ENTRY.format(proj)
+                        rej_reason: Tuple[str] = RejectionReasons.HEAVY_ENTRY.format(
+                            proj
+                        )
                         self.rejected_transcripts.append(
                             rej_reason
                         )  ## In need of Michael's advice here
@@ -1059,20 +1107,20 @@ class CesarScheduler(CommandLineManager):
                     proj_name_split: List[str] = proj.split("#")
                     tr: str = "#".join(proj_name_split[:-1])
                     chain: str = proj_name_split[-1]
-                    input_dir: str = Path(
-                        self.proj2storage[proj]
-                    ).absolute()
+                    input_dir: str = Path(self.proj2storage[proj]).absolute()
                     input_file: str = os.path.join(input_dir, "exon_storage.hdf5")
                     if self.container_image is not None:
-                        bindings: str = self.bindings if self.bindings is not None else ""
+                        bindings: str = (
+                            self.bindings if self.bindings is not None else ""
+                        )
                         executor: str = (
-                        f"{self.container_executor} run {{}} {{}} {{}} "
-                        f"{CESAR_WRAPPER_SCRIPT}"
-                    )
+                            f"{self.container_executor} run {{}} {{}} {{}} "
+                            f"{CESAR_WRAPPER_SCRIPT}"
+                        )
                     else:
                         executor: str = CESAR_WRAPPER_SCRIPT
                     cmd: str = (
-                        f"{executor} \"{tr}\" "
+                        f'{executor} "{tr}" '
                         f"{chain} {input_file} -cs {self.cesar_binary} "
                         f"-scm {self.correction_mode} "
                         f"-msp {self.min_splice_prob} "
@@ -1123,8 +1171,12 @@ class CesarScheduler(CommandLineManager):
                     cmd += f" -o {cesar_output}"
                     if self.container_image is not None:
                         if self.binding_map is not None:
-                            bind_key: str = CONTAINER_ENGINE2BIND_KEY[self.container_executor]
-                            bindings: str = self.bindings if self.bindings is not None else ""
+                            bind_key: str = CONTAINER_ENGINE2BIND_KEY[
+                                self.container_executor
+                            ]
+                            bindings: str = (
+                                self.bindings if self.bindings is not None else ""
+                            )
                             for key, value in self.binding_map.items():
                                 if not value:
                                     continue
@@ -1187,18 +1239,20 @@ class CesarScheduler(CommandLineManager):
             for line in self.rejected_transcripts:
                 h.write(line + "\n")
 
-    def _process_bindings(self, bindings: Union[str, None]) -> Union[Dict[str, str], None]:
+    def _process_bindings(
+        self, bindings: Union[str, None]
+    ) -> Union[Dict[str, str], None]:
         """Processes the directory bindings for the containter engine"""
         if bindings is None:
             return None
         binding_dict: Dict[str, str] = {}
-        for mount in bindings.strip().split(','):
-            if ':' not in mount:
+        for mount in bindings.strip().split(","):
+            if ":" not in mount:
                 if mount[-1] != os.sep:
                     mount += os.sep
-                binding_dict[mount] = ''
+                binding_dict[mount] = ""
                 continue
-            key, value = mount.split(':')
+            key, value = mount.split(":")
             if key[-1] != os.sep:
                 key += os.sep
             if value[-1] != os.sep:
