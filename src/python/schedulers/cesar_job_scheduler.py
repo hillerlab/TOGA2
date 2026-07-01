@@ -109,7 +109,7 @@ class ProjectionMeta:
 
     def __eq__(self, other: Any) -> bool:
         return (isinstance(other, type(self))) and (
-            all(self.x == other.x for x in self.__slots__)
+            all(self.__getattribute__(x) == other.__getattribute__(x) for x in self.__slots__)
         )
 
 
