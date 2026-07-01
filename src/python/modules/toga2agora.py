@@ -192,7 +192,8 @@ class Toga2Agora(CommandLineManager):
         self.run()
 
     def run(self) -> None:
-        """Create output directories, process the tree and all species, propagate ancestral gene sets, and write output."""
+        """Create output directories, process the tree and all species, 
+        propagate ancestral gene sets, and write output."""
         ## create the input directory
         self._to_log("Create output directory")
         self._mkdir(self.output)
@@ -248,7 +249,15 @@ class Toga2Agora(CommandLineManager):
                 self.species.add(node.name)
             else:
                 if not (node.name and node.name.strip()):
-                    node.name = "_".join(sorted(node.get_leaf_names()))
+                    # children: List[str] = sorted(node.get_leaf_names())
+                    children: List[str] = sorted((x.name for x in node.get_children()))
+                    self._debug(
+                        "Processing internal node with the following children: %s" % ",".join(children)
+                    )
+                    left: str = children[0].split("-")[0]
+                    right: str = children[-1].split("-")[-1]
+                    # node.name = "_".join(sorted(node.get_leaf_names()))
+                    node.name = f"{left}-{right}"
                 name = node.name
                 node_object: TreeNode = InternalNode(node.name)
                 self._debug(
