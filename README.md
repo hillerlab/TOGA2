@@ -28,7 +28,7 @@
         <br>
         <a href="https://github.com/hillerlab/TOGA2/wiki">docs</a> .
         <a href="https://github.com/hillerlab/TOGA2?tab=readme-ov-file#Installation">install</a> .
-        <a href ="https://www.biorxiv.org/content/10.64898/2026.06.30.735536v1">preprint</a>
+        <a href ="https://www.biorxiv.org/content/10.64898/2026.06.30.735536v1">preprint</a> .
         <a href="https://hillerlab.com/">us</a> 
     </samp>
   </p>
