@@ -61,7 +61,7 @@ The following reference species were used for the integrated annotation preparat
 For questions, please check whether the issue has already been addressed at https://github.com/hillerlab/TOGA2/issues. If not, please open a new issue.
 
 If you use these data, please cite: 
-Yury V. Malovichko et al. "Accurate, comprehensive gene annotation and ortholog identification across thousands of vertebrate genomes with TOGA2", in preparation
+Yury V. Malovichko et al. "Accurate, comprehensive gene annotation and ortholog identification across thousands of vertebrate genomes with TOGA2". bioRxiv 2026.06.30.735536; doi: https://doi.org/10.64898/2026.06.30.735536
 """
 
 REF_SUPPORT_LINE: str = "* {ref}: appears in {ref_genes}/{all_genes} ({gene_perc}%) orthologous query loci\n"
