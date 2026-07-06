@@ -298,7 +298,7 @@ def add_rejection_data(
         if rej_tr not in orig_tr2status:
             orig_tr2status[rej_tr] = rej_tr_status
         else:
-            orig_tr_status: str = orig_tr2status[tr]
+            orig_tr_status: str = orig_tr2status.get(tr, "N")
             ## TODO: This check is a safeguard for rare quirks
             ## when both spanning and regular orthologous projections are encountered;
             ## will be likely redundant in 2.1
