@@ -1082,40 +1082,6 @@ class CesarPreprocessor(CommandLineManager):
         Retrieves exon sequences and splice sites, then formats exon sequences
         and header suitable for CESAR input
         """
-        # ref_chroms: Set[str] = {x.chrom for x in self.annot_entries.values()}
-        # stderr.write(f'{ref_chroms=}\n')
-        # init = datetime.now()
-        # ref_2bit: Dict[str, str] = {
-        #     k:v[:] for k,v in TwoBitFile(self.ref).items() if k in ref_chroms
-        # }
-        # twobit_point = datetime.now()
-        # stderr.write(f'Reference genome upload time: {str((twobit_point - init).total_seconds())}\n')
-        # for tr, entry in self.annot_entries.items():
-        #     init = datetime.now()
-        #     chrom: str = self.annot_entries[tr].chrom
-        #     exon_coordinates, exon_sequences, s_sites, exon_flanks = get_exons(
-        #         entry, ref_2bit[chrom], mask_stops=True ## True stands for inframe stop codon masking
-        #     )
-        #     self.u12_sites[tr] = infer_u12_sites(s_sites, self.u12_sites[tr])
-        #     # exon_sequences, sec_codons = check_ref_exons(exon_sequences, True) ## True stands for inframe stop codon masking
-        #     # self.prepared_exons[tr] = prepare_exons_for_cesar(exon_sequences)
-        #     self.prepared_exons[tr] = exon_sequences
-        #     exon_prep_time = datetime.now()
-        #     stderr.write(f'Exon preparation time for tr {tr}: {str((exon_prep_time - init).total_seconds())}\n')
-        #     init = datetime.now()
-        #     self.exon_names_for_cesar[tr] = add_exon_headers(
-        #         sorted(entry.exons.keys()),
-        #         tr,
-        #         self.u12_sites[tr],
-        #         self.cesar_common_acceptor,
-        #         self.cesar_common_donor,
-        #         self.cesar_first_acceptor,
-        #         self.cesar_last_donor,
-        #         self.cesar_u12_acceptor,
-        #         self.cesar_u12_donor
-        #     )
-        #     header_point = datetime.now()
-        #     stderr.write(f'Header addition time for tr {tr}: {str((header_point - init).total_seconds())}\n')
         bed_file: str = ""
         s_site_flanks: Dict[str, Dict[int, Tuple[int]]] = defaultdict(dict)
         for tr, entry in self.annot_entries.items():
@@ -1131,9 +1097,10 @@ class CesarPreprocessor(CommandLineManager):
                 adj_stop: int = min(stop + 2, chrom_size)
                 l_flank: int = start - adj_start
                 r_flank: int = adj_stop - stop
-                s_site_flanks[tr][e_num] = (
-                    (l_flank, r_flank) if entry.strand else (r_flank, l_flank)
-                )
+                # s_site_flanks[tr][e_num] = (
+                #     (l_flank, r_flank) if entry.strand else (r_flank, l_flank)
+                # )
+                s_site_flanks[tr][e_num] = (l_flank, r_flank)
                 bed_line: str = (
                     f"{chrom}\t{adj_start}\t{adj_stop}\t{tr}|{e_num}\t0\t{strand}"
                 )
