@@ -211,7 +211,6 @@ def intersect_exons_to_blocks(  ## TODO: clearly must be moved to Exon2BlockMapp
     returns exon-to-block/gap mapping
     """
     # allt_starts, allt_stops, allq_starts, allq_stops = [], [], [], []
-    # print(f'{blocks=}')
     ## TODO:
     ## 1) Reduce the number of for-loops; sort the blocks and add the break statement (smart counter);
     ## 1a) Benchmark against the last wrapper run; make sure no results have changed;
@@ -263,7 +262,6 @@ def intersect_exons_to_blocks(  ## TODO: clearly must be moved to Exon2BlockMapp
         else:
             downstream_chain_gap: Union[str, None] = None
 
-    # print(f'{blocks=}')
     tstart: int = blocks[sorted_block_keys[0]][0]
     tstop: int = blocks[sorted_block_keys[-1]][1]
     qstart: int = min(x[2] for x in blocks.values())
@@ -308,7 +306,6 @@ def intersect_exons_to_blocks(  ## TODO: clearly must be moved to Exon2BlockMapp
                 f"Exon {exon.num} is missing from the chain"
             ) if verbose else None
             if exon.stop < t_chain_start or exon.start > t_chain_stop:
-                # print(f'{t_chain_start=}, {t_chain_stop=}, {qstart=}, {qstop=}, {exon.start=}, {exon.stop=}')
                 out_of_chain.add(e_num)
             # else:
             missing.add(e_num)
@@ -372,8 +369,6 @@ def intersect_exons_to_blocks(  ## TODO: clearly must be moved to Exon2BlockMapp
                     init_cov = intersection(*sorted(coords), *sorted(up_block[:2]))
         ## case 2: there are more than one block corresponding to the exon
         else:
-            # print(f'FLAG {blocks=}')
-            # print(f'FLAG {up_block_name=}, {down_block_name=}')
             new_up_block_name, next_up_block_name = (
                 up_block_name.split("_")
                 if "_" in up_block_name
@@ -452,12 +447,6 @@ def intersect_exons_to_blocks(  ## TODO: clearly must be moved to Exon2BlockMapp
                 dangling_down: bool = trim_down < -1 * (
                     donor_flank if codirected else acc_flank
                 )
-                # if codirected:
-                # print(f'{blocks[up_block_name][2]=}, {blocks[down_block_name][3]=}')
-                # else:
-
-                # print(f'{blocks[down_block_name][2]=}, {blocks[up_block_name][3]=}')
-                # print(f'{exon.start = }, {exon.stop = }, {trim_up = }, {trim_down = }')
                 if not min_upd:
                     side: str = "left" if codirected else "right"
                     logger.info(
@@ -538,8 +527,6 @@ def intersect_exons_to_blocks(  ## TODO: clearly must be moved to Exon2BlockMapp
             qstop = blocks[downstream_chain_gap][3]
         qstart, qstop = sorted((qstart, qstop))
 
-    # print(f'{out_of_chain=}')
-    # print(f'GAP LOCATED: {gap_located=}')
     if not spanning_chain and len(exons) > 1:
         for i, curr_exon in enumerate(sorted_exon_keys[1:], start=1):
             if (
@@ -555,7 +542,6 @@ def intersect_exons_to_blocks(  ## TODO: clearly must be moved to Exon2BlockMapp
                 or prev_exon in gap_located
             ):
                 continue
-            # print(f'{prev_exon=}, {curr_exon=}')
             ref_intron_start: int = exons[prev_exon].coords()[1]
             ref_intron_end: int = exons[curr_exon].coords()[0]
             ref_intron_len: int = ref_intron_end - ref_intron_start
@@ -575,7 +561,7 @@ def intersect_exons_to_blocks(  ## TODO: clearly must be moved to Exon2BlockMapp
                     % (min(prev_exon, curr_exon), query_intron_len)
                 )
                 ref_strand: bool = curr_exon > prev_exon
-                query_strand: bool = ref_strand == codirected
+                # query_strand: bool = ref_strand == codirected
                 prev_range: Iterable[int] = (
                     range(1, prev_exon + 1)
                     if ref_strand
@@ -925,7 +911,6 @@ class ProjectionGroup:
         present_exon_num: int = len(init_exon_range)
         while pointer <= present_exon_num - 1:
             curr_exon: int = init_exon_range[pointer]
-            # print(f'Current exon is {curr_exon}, pointer is {pointer}')
             curr_group: List[int] = [pointer]
             curr_start, curr_end = self.exon_search_spaces[curr_exon][2:]
             for next_pointer in range(pointer + 1, present_exon_num):
@@ -938,9 +923,7 @@ class ProjectionGroup:
                         % (curr_exon, next_exon)
                     )
                     curr_group.append(next_pointer)
-                    # print(f'{curr_start=}, {next_start=}, {min(curr_start, next_start)=}')
                     curr_start = min(curr_start, next_start)
-                    # print(f'{curr_end=}, {next_end=}, {max(curr_end, next_end)=}')
                     curr_end = max(curr_end, next_end)
             last_intersected: int = max(curr_group)
             group_to_add: List[int] = init_exon_range[pointer : last_intersected + 1]
@@ -950,13 +933,11 @@ class ProjectionGroup:
             )
             groups.append(group_to_add)
             pointer = last_intersected + 1
-            # print(f'Updated pointer is {pointer}')
         ## phase two: for exons within each group, update the expected coordinates
         for group in groups:
             sorted_by_coord: List[int] = sorted(
                 group, key=lambda x: self.exon_search_spaces[x][2:]
             )
-            # print(f'{group=}, {sorted_by_coord=}')
             for i, exon in enumerate(sorted_by_coord):
                 raw_curr_exon_start, raw_curr_exon_end = self.exon_expected_loci[exon][
                     2:
@@ -964,7 +945,6 @@ class ProjectionGroup:
                 flanked_curr_exon_start, flanked_curr_exon_end = (
                     self.exon_search_spaces[exon][2:]
                 )
-                # print(f'{raw_curr_exon_start=}, {raw_curr_exon_end=}, {flanked_curr_exon_start=}, {flanked_curr_exon_end=}')
                 if i < len(group) - 1:
                     next_exon: int = sorted_by_coord[i + 1]
                     raw_next_exon_start, raw_next_exon_end = self.exon_expected_loci[
@@ -973,7 +953,6 @@ class ProjectionGroup:
                     flanked_next_exon_start, flanked_next_exon_end = (
                         self.exon_search_spaces[next_exon][2:]
                     )
-                    # print(f'{raw_next_exon_start=}, {raw_next_exon_end=}, {flanked_next_exon_start=}, {flanked_next_exon_end=}')
                     upd_curr_flanked_end: int = max(
                         raw_curr_exon_end,
                         min(flanked_curr_exon_end, flanked_next_exon_start - 1),
@@ -999,7 +978,6 @@ class ProjectionGroup:
     def final_grouping(self, defined_groups: List[List[int]]) -> None:
         """Resolves grouping for undefined exons and defines group coordinates"""
         final_groups: List[List[int]] = [[x for x in y] for y in defined_groups]
-        # print(f'{final_groups=}, {self.exon_search_spaces=}')
         all_missing_exons: List[int] = sorted(
             x
             for x in range(self.first_exon, self.last_exon + 1)
@@ -1059,7 +1037,6 @@ class ProjectionGroup:
                     if x not in self.all_missing
                 ]
                 next_: Union[int, None] = None if not nexts else nexts[0]
-                # print(f'{prevs=}, {prev=}, {nexts=}, {next_=}, {self.strand=}, {self.first_exon=}, {self.last_exon=}')
                 if group_start is None:
                     neighbor: Union[int, None] = prev if self.strand else next_
                     if neighbor is None:
@@ -1084,8 +1061,6 @@ class ProjectionGroup:
                     )  # self.exon_search_spaces[neighbor][2] - 1
                 ## now, try shrinking this coordinates within the better-defined blocks
                 self._to_log(f"Shrinking search space for exon group {i}")
-                # print(f'{i=}, {group=}, {self.exon_coords[group[0]]=}')
-                # print(f'{group_start=}, {group_stop=}')
                 suitable_blocks: List[Tuple[int]] = self.mapper.get_suitable_blocks(
                     group_start, group_end
                 )
@@ -1098,7 +1073,6 @@ class ProjectionGroup:
                 max_inter_coords: Tuple[Union[int, None]] = define_max_space(
                     suitable_blocks, group_len, self.max_space_size
                 )
-                # print(f'{group_start=}, {group_stop=}, {max_inter_coords=}, {group_len=}, {self.max_space_size=}')
                 if max_inter_coords[0] is not None:
                     if (max_inter_coords[1] - max_inter_coords[0]) < (
                         group_end - group_start
@@ -1202,7 +1176,7 @@ def prepare_exons(
         ## process splice sites if any were captured during sequence extraction
         acc_flank, donor_flank = exon_flanks[num]
         acc_: str = raw_seq[:acc_flank]
-        donor_: str = raw_seq[-donor_flank:]
+        donor_: str = raw_seq[-(donor_flank if donor_flank > 0 else len(raw_seq)):]
         if is_first:
             acc_ = "NN"
             # acc_flank = 0
@@ -1216,7 +1190,7 @@ def prepare_exons(
         s_sites.append(acc_.lower())
         s_sites.append(donor_.lower())
 
-        exon_seq: str = raw_seq[acc_flank:-donor_flank]
+        exon_seq: str = raw_seq[acc_flank : (-donor_flank if donor_flank > 0 else len(raw_seq))]
         ## assess exon's phase
         prev_phase: int = (3 - phase) if phase > 0 else 0
         next_phase: int = (len(exon_seq) - prev_phase) % 3
