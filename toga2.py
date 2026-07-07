@@ -1480,7 +1480,7 @@ internal exons shorter than this value are removed from the annotation."""
 )
 @input_options.option(
     "--min_intron_length",
-    "-min_e",
+    "-min_ie",
     type=int,
     metavar="INT",
     default=0,
