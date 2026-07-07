@@ -1503,7 +1503,7 @@ of the following conditions hold:\n
 \t\t* the coding sequence length is shorter than 100 bases;\n
 \t\t* distance between the CDS end and the first UTR-UTR intron is more than 400 bases;\n 
 \t* If set to 2, the CDS-last UTR-UTR junction distance threshold is set to 55, and none of 
-the two mitigating conditions above applies.
+the two mitigating conditions above applies\n.
 """
 )
 @control_flow_options.option(
