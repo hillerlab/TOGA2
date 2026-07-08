@@ -13,25 +13,33 @@ class Gxf:
     CDS: str = "CDS"
     EXON_TYPES: Tuple[str, str] = (EXON, CDS)
     ID: str = "ID"
+    PARENT: str = "Parent"
     GTF: str = "gtf"
     GFF3: str = "gff"
     GFX: Tuple[str, str] = (GTF, GFF3)
     BED: str = "bed"
     ANNOT_FORMAT: str = (BED, GTF, GFF3)
-    BIOTYPES: Tuple[str, ...] = ("biotype", "gene_biotype", "transcript_biotype",)
+    BIOTYPES: Tuple[str, ...] = ("biotype", "gene_biotype", "transcript_biotype", "gbkey")
     GENE_ID: str = "gene_id"
     TR_ID: str = "transcript_id"
     TR_PREFICES: Tuple[str, ...] = ("transcript:", "rna-", "gene-",)
-    EXON_PARENTS: Tuple[str, ...] = ("transcript_id", "Parent", "ID",)
-    TR_PARENTS: Tuple[str, ...] = ("gene_name", "gene", "gene_id", "Name", "ID",)
+    EXON_PARENTS: Tuple[str, ...] = ("transcript_id", PARENT, ID,)
+    TR_PARENTS: Tuple[str, ...] = ("gene_name", "gene", "gene_id", "Name", ID,)
     CODING_TAGS: Tuple[str, str] = ("mRNA", "protein_coding", "transcript",)
     VDJ_TAGS: Tuple[str, ...] = ("V_segment", "C_region", "V_gene_segment", "C_gene_segment",)
+
+    @classmethod
+    def remove_tr_prefices(cls, name: str) -> str:
+        for prefix in cls.TR_PREFICES:
+            if name.startswith(prefix):
+                name = name[len(prefix):]
+        return name
 
     @classmethod
     def get_exon_parent(cls, attrs: Dict[str, str]) -> str:
         for parent_slot in cls.EXON_PARENTS:
             if parent_slot in attrs and attrs[parent_slot]:
-                return attrs[parent_slot]
+                return cls.remove_tr_prefices(attrs[parent_slot])
         return ""
 
     @classmethod
@@ -40,13 +48,6 @@ class Gxf:
             if bio_slot in attrs and attrs[bio_slot]:
                 return attrs[bio_slot]
         return
-
-    @classmethod
-    def remove_tr_prefices(cls, name: str) -> str:
-        for prefix in cls.TR_PREFICES:
-            if name.startswith(prefix):
-                name = name[len(prefix):]
-        return name
 
     @classmethod
     def get_transcript_parent(cls, attrs: Dict[str, str]):

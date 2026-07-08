@@ -1480,7 +1480,7 @@ internal exons shorter than this value are removed from the annotation."""
 )
 @input_options.option(
     "--min_intron_length",
-    "-min_e",
+    "-min_ie",
     type=int,
     metavar="INT",
     default=0,
@@ -1503,7 +1503,7 @@ of the following conditions hold:\n
 \t\t* the coding sequence length is shorter than 100 bases;\n
 \t\t* distance between the CDS end and the first UTR-UTR intron is more than 400 bases;\n 
 \t* If set to 2, the CDS-last UTR-UTR junction distance threshold is set to 55, and none of 
-the two mitigating conditions above applies.
+the two mitigating conditions above applies\n.
 """
 )
 @control_flow_options.option(
@@ -1587,6 +1587,13 @@ will be sought for in $PATH""",
     default=None,
     show_default=False,
     help="A path to save the results to [default: TOGA2_ref_annotation_<hex_code>]",
+)
+@out_options.option(
+    "--strip_versions",
+    "-stripv",
+    is_flag=True,
+    default=False,
+    help="Strip version identifiers from input chromosome/transcript identifiers preceded by a dot"
 )
 @out_options.option(
     "--prefix",
