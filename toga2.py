@@ -1589,6 +1589,13 @@ will be sought for in $PATH""",
     help="A path to save the results to [default: TOGA2_ref_annotation_<hex_code>]",
 )
 @out_options.option(
+    "--strip_versions",
+    "-stripv",
+    is_flag=True,
+    default=False,
+    help="Strip version identifiers from input chromosome/transcript/gene identifiers preceded by a dot"
+)
+@out_options.option(
     "--prefix",
     type=str,
     metavar="STR",
