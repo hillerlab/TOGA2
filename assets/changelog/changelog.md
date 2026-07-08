@@ -18,6 +18,7 @@
 * Minor changes:
     * `prepare-input` mode:
         * Colon (":") symbol now accepted in gene/transcript names (also applies to `run` mode)
+        * `--strip_versions` argument for chromosome (scaffold, contig, etc.) and transcript version removal (v2.0.9c)
     * `run` mode:
         * `preprocessing.py` + `cesar_preprocess.py`:
             * Fixed zero donor flank handling at sequence extraction (v2.0.9b);
