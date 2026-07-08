@@ -19,7 +19,7 @@ class Gxf:
     GFX: Tuple[str, str] = (GTF, GFF3)
     BED: str = "bed"
     ANNOT_FORMAT: str = (BED, GTF, GFF3)
-    BIOTYPES: Tuple[str, ...] = ("biotype", "gene_biotype", "transcript_biotype",)
+    BIOTYPES: Tuple[str, ...] = ("biotype", "gene_biotype", "transcript_biotype", "gbkey")
     GENE_ID: str = "gene_id"
     TR_ID: str = "transcript_id"
     TR_PREFICES: Tuple[str, ...] = ("transcript:", "rna-", "gene-",)

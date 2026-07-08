@@ -168,6 +168,7 @@ class InputProducer(CommandLineManager):
         "rejected_transcripts",
         "immune",
         "rejected_lines",
+        "strip_versions",
         "intronic",
         "ic_cores",
         "twobittofa_binary",
@@ -286,6 +287,30 @@ class InputProducer(CommandLineManager):
                 status = IsNMD.STRONG
         return status
 
+    @staticmethod
+    def strip_v(name: str) -> str:
+        """
+        Removes the version identifier from the item (chromosome/contig/scaffold/transcript/gene) name.
+        If a name contains no dot symbols, returns the input string. If a name starts with leading dots,
+        strips them beforehand.
+
+        Args:
+            name: item name
+
+        Returns:
+            str item name without the version identifier
+
+        Example:
+            base: str = InputProducer.strip_v("XM_035385144.1")
+            assert(base == "XM_035385144")
+        """
+        comps: List[str] = name.lstrip(".").split(".")
+        if len(comps) == 1:
+            return name
+        if not comps[-1].isdigit():
+            return name
+        return ".".join(comps[:-1])
+
     def __init__(
         self,
         ref_2bit: click.Path,
@@ -311,6 +336,7 @@ class InputProducer(CommandLineManager):
         fatotwobit_binary: Optional[Union[click.Path, None]] = None,
         min_intron_length_cesar: Optional[int] = MIN_INTRON_LENGTH_FOR_PROFILES,
         keep_temporary: Optional[bool] = False,
+        strip_versions: Optional[bool] = False,
     ) -> None:
         self.v: bool = True
         self.set_logging()
@@ -340,6 +366,7 @@ class InputProducer(CommandLineManager):
         self.output: str = (
             output if output is not None else hex_dir_name(DEFAULT_PREFIX)
         )
+        self.strip_versions: bool = strip_versions
         self.tmp_dir: str = os.path.join(self.output, dir_name_by_date("tmp"))
         self.keep_tmp: bool = keep_temporary
 
@@ -544,13 +571,13 @@ class InputProducer(CommandLineManager):
 
         tr_objects: Dict[str, GxfTranscript] = {}
         for i, data in enumerate(read_tab(self.annot), start=1):
+            if data[0].startswith("#"):
+                continue
             if len(data) < 9:
                 self._to_log(
                     "Less than nine fields encountered in the GXF file at line %i" % i,
                     "warning",
                 )
-            if data[0].startswith("#"):
-                continue
             chrom: str = data[0]
             level: str = data[2]
             strand: bool = data[6] == "+"
@@ -559,13 +586,20 @@ class InputProducer(CommandLineManager):
             )
             biotype: Union[str, None] = Gxf.get_biotype(attrs)
             # gene_id: str = attrs.get(Gxf.GENE_ID, "")
-            tr_id: str = attrs.get(Gxf.TR_ID, "")
+            tr_id: str = (
+                attrs.get(Gxf.TR_ID, "") if 
+                self.annot_format == Gxf.GTF else 
+                attrs.get(Gxf.ID, "")
+            )
             tr_id = Gxf.remove_tr_prefices(tr_id)
+            # if level == Gxf.CDS:
+            #     print(f"{attrs=}")
+            #     print(f"{tr_id=}")
             if not tr_id:
                 continue
             parent: str = Gxf.get_exon_parent(attrs)
             ## check the item's  biotype
-            if biotype in Gxf.CODING_TAGS or level == Gxf.CDS:
+            if biotype in Gxf.CODING_TAGS or level in Gxf.CODING_TAGS or level == Gxf.CDS:
                 ## messenger RNA transcript
                 is_coding: bool = True
             elif biotype in Gxf.VDJ_TAGS:
@@ -577,7 +611,9 @@ class InputProducer(CommandLineManager):
                 continue
             start: int = int(data[3]) - 1  ## GXF is 1-based, BED is 0-based
             end: int = int(data[4])
-            if level == Gxf.TRANSCRIPT:
+            # if level == Gxf.TRANSCRIPT:
+            if level in Gxf.CODING_TAGS:
+                # print(f"TRANSCRIPT FOUND: {tr_id}")
                 gene: str = Gxf.get_transcript_parent(attrs)
                 tr_obj: GxfTranscript = GxfTranscript(
                     chrom,
@@ -589,6 +625,7 @@ class InputProducer(CommandLineManager):
                     is_coding,
                 )
                 tr_objects[tr_id] = tr_obj
+                continue
             if level not in Gxf.EXON_TYPES:
                 continue
             parent: str = Gxf.get_exon_parent(attrs)
@@ -644,16 +681,19 @@ class InputProducer(CommandLineManager):
                 sizes: str = ",".join(sizes) + ","
                 starts: str = ",".join(starts) + ","
                 strand: str = "+" if tr_obj.strand else "-"
+                if self.strip_versions:
+                    tr_obj.name = self.strip_v(tr_obj.name)
+                    # tr_obj.parent = self.strip_v(tr_obj.parent)
                 name: str = f"{tr_obj.name}#{tr_obj.parent}"
                 if not tr_obj.is_coding:
                     cds_start: int = tr_obj.start if tr_obj.cds_start is None else tr_obj.cds_start
                     cds_end: int = tr_obj.start if tr_obj.cds_end is None else tr_obj.cds_end
+                    self.immune.add(name)
                 else:
                     cds_start: int = tr_obj.cds_start
                     cds_end: int = tr_obj.cds_end
                     if cds_start is None or cds_end is None:
                         continue
-                    self.immune.add(name)
                 bed_line: str = BED_LINE.format(
                     chrom=tr_obj.chrom,
                     start=tr_obj.start,
@@ -714,13 +754,18 @@ class InputProducer(CommandLineManager):
                         % (i, field)
                     )
             name: str = data[3]
-            is_coding: bool = name in self.immune
-            line = "\t".join(data)
+            if self.strip_versions and self.annot_format == Gxf.BED:
+                name = self.strip_v(name)
+            is_coding: bool = name not in self.immune
             ## remove the transcripts with improperly formatted names
             if not consistent_name(name):
                 illegal_name.add(name)
                 continue
             chrom: str = data[0]
+            if self.strip_versions:
+                chrom = self.strip_v(chrom)
+                data[0] = chrom
+            line = "\t".join(data)
             ## if entries were restricted to specific contigs,
             ## apply the respective filters
             if self.contigs and chrom not in self.contigs:
@@ -782,7 +827,6 @@ class InputProducer(CommandLineManager):
                     else:
                         continue
                 if size < self.min_int_exon_length and not (start <= cds_start or end >= cds_end):
-                    print(f"{name=}, {start=}, {end=}, {cds_end=}")
                     has_short_exons = True
                 frame_length += size
                 if prev_end is not None:
@@ -802,7 +846,7 @@ class InputProducer(CommandLineManager):
             if flawed:
                 continue
             self.tr2annot[name] = line
-            self.tr2coords[name] = (data[0], cds_start, cds_end, strand)
+            self.tr2coords[name] = (chrom, cds_start, cds_end, strand)
 
         ## report the discarded items
         if illegal_name:
@@ -925,6 +969,11 @@ class InputProducer(CommandLineManager):
                     % (i, len(data))
                 )
             gene, tr = data
+            if self.strip_versions and self.annot_format == Gxf.BED:
+                ## stripping genes from the dot identifier is discouraged
+                ## since some RefSeq genes (sadly!) contain dots in gene symbols
+                # gene, tr = map(self.strip_v, data)
+                tr = self.strip_v(tr)
             if gene not in gene2trs:
                 gene2trs[gene] = []
             if tr in self.rejected_transcripts:
@@ -1082,7 +1131,6 @@ class InputProducer(CommandLineManager):
                     continue
                 if line[0] == ">":
                     name, exon = line.lstrip(">").split("_exon")
-                    # print(f'{name=}, {exon=}, {prev_name=}, {prev_exon=}')
                     if not prev_name:
                         prev_name = name
                     exon: int = int(exon)
