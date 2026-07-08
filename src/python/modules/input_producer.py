@@ -585,16 +585,12 @@ class InputProducer(CommandLineManager):
                 data[8], gff3=(self.annot_format == Gxf.GFF3)
             )
             biotype: Union[str, None] = Gxf.get_biotype(attrs)
-            # gene_id: str = attrs.get(Gxf.GENE_ID, "")
             tr_id: str = (
                 attrs.get(Gxf.TR_ID, "") if 
                 self.annot_format == Gxf.GTF else 
                 attrs.get(Gxf.ID, "")
             )
             tr_id = Gxf.remove_tr_prefices(tr_id)
-            # if level == Gxf.CDS:
-            #     print(f"{attrs=}")
-            #     print(f"{tr_id=}")
             if not tr_id:
                 continue
             parent: str = Gxf.get_exon_parent(attrs)
@@ -613,7 +609,6 @@ class InputProducer(CommandLineManager):
             end: int = int(data[4])
             # if level == Gxf.TRANSCRIPT:
             if level in Gxf.CODING_TAGS:
-                # print(f"TRANSCRIPT FOUND: {tr_id}")
                 gene: str = Gxf.get_transcript_parent(attrs)
                 tr_obj: GxfTranscript = GxfTranscript(
                     chrom,
@@ -655,6 +650,8 @@ class InputProducer(CommandLineManager):
                 e += 1
             tr_objects[parent].exons.append((start, end))
             tr_objects[parent].exons.sort(key=lambda x: (x[0], x[1]))
+            ## the outcommented block below can significantly speed the exon addition up
+            ## but it's better to assume that the user might provide an unsorted GXF file (why tho?)
             # prev_start, prev_end = tr_objects[parent].exons.pop(-1)
             # if intersection(start, end, prev_start, prev_end) >= 0:
             #     tr_objects[parent].exons.append(
@@ -665,8 +662,6 @@ class InputProducer(CommandLineManager):
         with (
             open(self.provisional_bed, "w") as bed,
             open(self.provisional_isoforms, "w") as iso,
-            # open(self.provisional_immune_bed, "w") as i_bed,
-            # open(self.proivisional_immune_isoforms, "w") as i_iso,
         ):
             for tr_obj in tr_objects.values():
                 sizes: List[str] = []
@@ -715,8 +710,6 @@ class InputProducer(CommandLineManager):
         Filters reference annotation by the following criteria:
         * All transcripts in the final annotation must be
         """
-        ## TODO: Ideally copy the code here and modify as needed;
-        ## a bit of silly code repetition, but at least no need to parse the rejection log
         illegal_name: Set[str] = set()
         rejected_contigs: Set[str] = set()
         non_coding: Set[str] = set()
