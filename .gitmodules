@@ -9,3 +9,6 @@
 [submodule "CESAR2.0"]
 	path = CESAR2.0
 	url = https://github.com/hillerlab/CESAR2.0
+[submodule "toga2kbpython"]
+	path = toga2kbpython
+	url = https://github.com/hillerlab/toga2kbpython
