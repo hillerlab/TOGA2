@@ -57,6 +57,8 @@ CANON: str = "canon"
 NONCANON: str = "nonCanon"
 SEP_DUMMY: str = "n"
 NAME: str = "name"
+TYPE_ID: str = "type_id"
+DEFAULT_CLASS_COL: int = 12
 
 GENE_BED_LINE: str = "{chrom}\t{start}\t{end}\t{name}\t1000\t{strand}\n"
 BED_LINE: str = "{chrom}\t{start}\t{end}\t{name}\t0\t{strand}\t{cds_start}\t{cds_end}\t0,0,0,\t{exon_num}\t{sizes}\t{starts}\n"
@@ -739,6 +741,7 @@ class InputProducer(CommandLineManager):
                 )
             for field in NUMERIC_FIELDS:
                 if not data[field].replace(",", "").isdigit():
+
                     self._die(
                         (
                             "Improper formatting at reference annotation file line %i; "
@@ -1128,12 +1131,10 @@ class InputProducer(CommandLineManager):
                         prev_name = name
                     exon: int = int(exon)
                     if name != prev_name and prev_name:
-                        # print(f'{prev_name=}, {name=}, {prev_exon=}, {exon=}')
                         h.write(">" + prev_name + "\n" + curr_seq + "\n")
                         curr_seq = ""
                         prev_name = name
                         prev_exon = 0
-                        # print(f'{prev_name=}, {name=}, {prev_exon=}, {exon=}')
                     if prev_exon >= exon:
                         self._die(
                             (
@@ -1265,10 +1266,14 @@ class InputProducer(CommandLineManager):
                         % (i, len(data))
                     )
                 if data[0] == NAME:
+                    try:
+                        class_col: int = data.index(TYPE_ID)
+                    except ValueError:
+                        class_col: int = DEFAULT_CLASS_COL
                     continue
                 name: str = data[0].split(";")[0]
                 dinuc: str = data[2]
-                intron_class: str = data[12].upper()
+                intron_class: str = data[class_col].upper()
                 upd_name: str = f"{name}_{intron_class}_{dinuc}"
                 out_line: str = "\t".join(intron2coords[name]).format(upd_name)
                 ## for TOGA2 input, only U12 and non-canonical U2 introns are required
