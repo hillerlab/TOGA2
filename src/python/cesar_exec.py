@@ -878,6 +878,16 @@ class CesarExecutor(CommandLineManager):
 
                 ## parse the CESAR results and store the CesarExonEntry objects
                 cesar_lines = cesar_out.split("\n")
+                if not len(cesar_lines[1].strip()):
+                    self._die(
+                        "Zero length aligned reference sequence for exon group %i (exons: %s) in projection %s"
+                        % (g, ", ".join(map(str, group.exons)), self.projection_name)
+                    )
+                if not len(cesar_lines[3].strip()):
+                    self._die(
+                        "Zero length aligned query sequence for exon group %i (exons: %s) in projection %s"
+                        % (g, ", ".join(map(str, group.exons)), self.projection_name)
+                    )
                 result: RawCesarOutput = RawCesarOutput(
                     group.chain,
                     group.chrom,
