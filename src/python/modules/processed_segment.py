@@ -2732,6 +2732,8 @@ class ProcessedSegment:
         Recalculates the raw SpliceAI predictions for easier use during the
         self.process() run
         """
+        if not p.spliceai_sites:
+            return
         for exon in p.exons:
             space_start, space_stop = p.exon_search_spaces[exon]
             if space_start is None:
@@ -2744,6 +2746,11 @@ class ProcessedSegment:
                     for x, y in p.spliceai_sites["acceptor"].items()
                 }
                 continue
+            if exon not in self.abs_exon_coords:
+                raise ValueError(
+                    "No absolute coordinates recorded for exon %i in transcript %s, chain %s" 
+                    % (exon, self.transcript, p.chain)
+                )
             aln_start, aln_stop = self.abs_exon_coords[exon].tuple()
             start: int = min(space_start, aln_start)
             stop: int = max(space_stop, aln_stop)
