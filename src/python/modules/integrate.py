@@ -22,6 +22,7 @@ from .results_checks import BREAK_LINE, to_perc
 from .shared import (
     CommandLineManager,
     base_proj_name,
+    get_connected_components,
     get_proj2trans,
     get_upper_dir,
     make_cds_track,
@@ -68,12 +69,12 @@ REF_SUPPORT_LINE: str = "* {ref}: appears in {ref_genes}/{all_genes} ({gene_perc
 GENE_TSV_HEADER: str = "query_gene\tprojection\n"
 
 ## check the NetworkX version
-nx_v: str = nx.__version__
-v_split: List[str] = [x for x in nx_v.split(".") if x.isnumeric()]
-if len(v_split) > 1:
-    NX_VERSION: float = float(f"{v_split[0]}.{v_split[1]}")
-else:
-    NX_VERSION: float = float(v_split[0])
+# nx_v: str = nx.__version__
+# v_split: List[str] = [x for x in nx_v.split(".") if x.isnumeric()]
+# if len(v_split) > 1:
+#     NX_VERSION: float = float(f"{v_split[0]}.{v_split[1]}")
+# else:
+#     NX_VERSION: float = float(v_split[0])
 
 logging.root.handlers = []
 
@@ -128,7 +129,7 @@ class ReferenceBundle:  ## initialized from a JSON object
         self.priority: int = kwargs.get("priority", priority)
 
 
-@dataclass
+@dataclass  
 class BedRecord:
     """
     Data class containing data for a single BED file record
@@ -137,40 +138,42 @@ class BedRecord:
     __slots__ = (
         "name",
         "ref",
-        "chrom",
-        "start",
-        "end",
-        "strand",
+            # "chrom",
+            # "start",
+            # "end",
+            # "strand",
         "loss_status",
         "lines",
         "cds_lines",
         "exons",
+        "coordinates",
     )
 
     def __init__(
         self,
         name: str,
         ref: str,
-        chrom: str,
-        start: int,
-        end: int,
-        strand: bool,
+        # strand: bool,
         loss_status: str,
         # lines: List[str],
         lines: Dict[str, str],
     ) -> None:
         self.name: str = name
         self.ref: str = ref
-        self.chrom: str = chrom
-        self.start: int = start
-        self.end: int = end
-        self.strand: bool = strand
+        # self.chrom: str = chrom
+        # self.chrom: Tuple[str, ...] = (chrom,)
+        # self.start: int = start
+        # self.start: Tuple[int, ...] = (start,)
+        # self.end: int = end
+        # self.end: Tuple[int, ...] = (end,)
+        # self.strand: bool = strand
         self.loss_status: str = loss_status
         self.lines: Dict[str, str] = lines
         self.cds_lines: Dict[str, str] = {
             x: make_cds_track(y) for x, y in lines.items()
         }
         self.exons: List[str] = []
+        self.coordinates: Dict[str, Tuple[int, int]] = {}
 
     def return_bed_line(self, prefix: Union[str] = "") -> Iterable[str]:
         """Returns the initial BED line for the projection"""
@@ -183,8 +186,16 @@ class BedRecord:
                 CLASS_TO_COL[self.loss_status],
             )
 
-    def coords(self) -> Tuple[int, int]:
-        return (self.start, self.end)
+    def update_coordinates(self, chrom: str, start: int, end: int, strand: bool) -> None:
+        start, end = sorted((start, end))
+        if chrom in self.coordinates:
+            _start, _end, _ = self.coordinates[chrom]
+            start = min(start, _start)
+            end = max(end, _end)
+        self.coordinates[chrom] = (start, end, strand)
+
+    # def coords(self) -> Tuple[int, int]:
+    #     return (self.start, self.end)
 
 
 @dataclass
@@ -305,7 +316,7 @@ class AnnotationIntegrator(CommandLineManager):
         self.query_name: str = query_name
         self.query_projections: Dict[str, BedRecord] = {}
         self.query_proj2ref: Dict[str, str] = {}
-        self.query_annotation: Dict[str, List[str]] = defaultdict(list)
+        self.query_annotation: Dict[str, Set[str]] = defaultdict(set)
         self.ref_proj2gene: Dict[str, str] = {}
         self.intersecting_ref_genes: Dict[str, Set[str]] = defaultdict(set)
         self.paralog_pool: Set[str] = set()
@@ -335,9 +346,13 @@ class AnnotationIntegrator(CommandLineManager):
         self.gene_bed: os.PathLike = os.path.join(output, "query_genes.bed")
         self.projection_bed: os.PathLike = os.path.join(output, "query_annotation.bed")
         self.query_gtf: os.PathLike = os.path.join(output, "query_annotation.gtf")
-        self.query_genes_for_gtf: os.PathLike = os.path.join(output, "query_genes.for_gtf.tsv")
+        self.query_genes_for_gtf: os.PathLike = os.path.join(
+            output, "query_genes.for_gtf.tsv"
+        )
         self.summary: os.PathLike = os.path.join(output, "summary.txt")
-        self.support_matrix_file: os.PathLike = os.path.join(output, "query_genes_by_reference.tsv")
+        self.support_matrix_file: os.PathLike = os.path.join(
+            output, "query_genes_by_reference.tsv"
+        )
         self.ucsc_dir: os.PathLike = os.path.join(output, "ucsc_browser_files")
 
         self.protein_file: str = os.path.join(output, "protein.fa.gz")
@@ -520,6 +535,7 @@ class AnnotationIntegrator(CommandLineManager):
                 if name in self.query_projections:
                     if "," in name:
                         self.query_projections[name].lines[segment] = line_template
+                        self.query_projections[name].update_coordinates(chrom, start, end, strand)
                     else:
                         self._die(
                             "Duplicated non-fragmented entry for reference %s: %s"
@@ -529,17 +545,18 @@ class AnnotationIntegrator(CommandLineManager):
                     record: BedRecord = BedRecord(
                         name,
                         species,
-                        chrom,
-                        start,
-                        end,
-                        strand,
+                        # chrom,
+                        # start,
+                        # end,
+                        # strand,
                         status,
                         # [line_template],
                         {segment: line_template},
                     )
+                    record.update_coordinates(chrom, start, end, strand)
                     self.query_projections[name] = record
                 self.query_proj2ref[name] = species
-                self.query_annotation[chrom].append(name)
+                self.query_annotation[chrom].add(name)
                 if "#paralog" in name:
                     self.paralog_pool.add(base_proj_name(name))
                     # self.paralog_pool.add(name)
@@ -719,21 +736,26 @@ class AnnotationIntegrator(CommandLineManager):
         self._to_log(
             "Inferring query genes from the combined annotation; might take a while"
         )
-        ## create the graph structure
+        ## create a provisional edge storage
+        edges: List[Tuple[str, str]] = []
+        ## populate the intersection graph
         ## iterate over chromosomes
         for chrom, projections in self.query_annotation.items():
             ## sort the projections
-            projections.sort(
-                key=lambda x: (
-                    self.query_projections[x].start,
-                    self.query_projections[x].end,
-                )
+            projections = sorted(
+                projections,
+                key=lambda x: (self.query_projections[x].coordinates[chrom][:2])
             )
             ## start iterating over projections
             for i, name_out in enumerate(projections):
+                if name_out in self.discarded_items:
+                    continue
                 proj_out: BedRecord = self.query_projections[name_out]
-                out_start: int = proj_out.start
-                out_end: int = proj_out.end
+                ## v2.0.9e+ update:
+                ## coordinates are now stored chromosome-wise in the BedRecord.coordinates slot 
+                # out_start: int = proj_out.start
+                # out_end: int = proj_out.end
+                out_start, out_end, out_strand = proj_out.coordinates[chrom]
                 out_tr: str = get_proj2trans(name_out)[0]
                 # out_paralog: bool = name_out in self.paralog_pool
                 # out_ppgene: bool = name_out in self.ppgene_pool
@@ -744,15 +766,18 @@ class AnnotationIntegrator(CommandLineManager):
                 out_ppgene: bool = base_proj_name(name_out) in self.ppgene_pool
                 out_ortholog: bool = not (out_paralog or out_ppgene)
                 discarded: bool = False
-                edges: List[str] = []
-                for j, name_in in enumerate(projections[i + 1 :], start=i):
+                # edges: List[str] = []
+                for j, name_in in enumerate(projections[i + 1 :], start=i+1):
                     proj_in: BedRecord = self.query_projections[name_in]
                     ## if an item has been already discarded, skip it
                     if name_in in self.discarded_items:
                         continue
                     in_tr: str = get_proj2trans(name_in)[0]
-                    in_start: int = proj_in.start
-                    in_end: int = proj_in.end
+                    ## v2.0.9e+ update:
+                    ## coordinates are now stored chromosome-wise in the BedRecord.coordinates slot 
+                    # in_start: int = proj_in.start
+                    # in_end: int = proj_in.end
+                    in_start, in_end, in_strand = proj_in.coordinates[chrom]
                     ## as long as transcripts are sorted properly,
                     ## it's safe to break the inner loop here
                     if in_start >= out_end:
@@ -761,9 +786,9 @@ class AnnotationIntegrator(CommandLineManager):
                     if in_end <= out_start:
                         continue
                     ## ignore projections encoded by different strands
-                    if proj_in.strand != proj_out.strand:
+                    # if proj_in.strand != proj_out.strand:
+                    if in_strand != out_strand:
                         continue
-                    ## ignore projections encoded by different strands
                     # in_paralog: bool = name_in in self.paralog_pool
                     # in_ppgene: bool = name_in in self.ppgene_pool
                     in_paralog: bool = base_proj_name(name_in) in self.paralog_pool
@@ -772,39 +797,50 @@ class AnnotationIntegrator(CommandLineManager):
                     )
                     in_ppgene: bool = base_proj_name(name_in) in self.ppgene_pool
                     in_ortholog: bool = not (in_paralog or in_ppgene)
+                    ## set the overlap flag
                     has_intersection: bool = False
-                    for ex_out in proj_out.exons:
-                        for ex_in in proj_in.exons:
-                            if (
-                                intersection(
-                                    ex_out.start, ex_out.end, ex_in.start, ex_in.end
-                                )
-                                > 0
-                            ):
-                                has_intersection = True
+                    ## get the progenitor genes for both transcripts
+                    out_gene: str = self.ref_proj2gene.get(out_tr)
+                    in_gene: str = self.ref_proj2gene.get(in_tr)
+                    ## if the break/continue conditions above are met,
+                    ## coordinate intervals are guaranteed to overlap
+                    ## now, if the co-located projections belong to the same gene/transcript
+                    ## from the same reference, collapse them regardless of the exon overlap
+                    if out_gene == in_gene != None:
+                        has_intersection = True
+                    else:
+                        for ex_out in proj_out.exons:
+                            for ex_in in proj_in.exons:
+                                if (
+                                    intersection(
+                                        ex_out.start, ex_out.end, ex_in.start, ex_in.end
+                                    )
+                                    > 0
+                                ):
+                                    has_intersection = True
+                                    break
+                            if has_intersection:
+                                # if out_paralog or in_paralog:
                                 break
-                        if has_intersection:
-                            # if out_paralog or in_paralog:
-                            break
                     if has_intersection:
                         ## check for intersections in the reference
-                        out_gene: str = self.ref_proj2gene.get(out_tr)
-                        in_gene: str = self.ref_proj2gene.get(in_tr)
-                        if out_gene and in_gene:
-                            if out_gene in self.intersecting_ref_genes.get(
-                                in_gene, []
-                            ) or in_gene in self.intersecting_ref_genes.get(
-                                out_gene, []
-                            ):
+                        if out_gene and in_gene and (
+                            out_gene in self.intersecting_ref_genes.get(in_gene, []) or 
+                            in_gene in self.intersecting_ref_genes.get(out_gene, [])
+                        ):
                                 continue
                         ## ortholog + paralog/pp: discard the non-orthologous prediction
                         if out_ortholog and not in_ortholog and not in_valid_paralog:
                             self.discarded_items.add(name_in)
+                            if "MGC157408#2897" in name_in:
+                                self._to_log("The following MGC157408#2897 instance was discarded as incoming node: %s" % name_in)
                             continue
                         if (
                             not out_ortholog and not out_valid_paralog and in_ortholog
                         ):  # not out_ortholog and in_ortholog:
                             self.discarded_items.add(name_out)
+                            if "MGC157408#2897" in name_in:
+                                self._to_log("The following MGC157408#2897 instance was discarded as outcoming node: %s" % name_out)
                             discarded = True
                             break
                         ## ppgene + paralog: discard the ppgene
@@ -816,14 +852,27 @@ class AnnotationIntegrator(CommandLineManager):
                             discarded = True
                             break
                         ## same orthology class: add the edge
-                        edges.append(name_in)
-                if discarded:
-                    continue
+                        # edges.append(name_in)
+                        edges.append((name_out, name_in))
+                if not discarded:
+                    edges.append((name_out,))
+                # if discarded:
+                #     continue
                 ## add the edges to the graph
-                if name_out not in self.graph.nodes:
-                    self.graph.add_node(name_out)
-                for name_in in edges:
-                    self.graph.add_edge(name_out, name_in)
+                # if name_out not in self.graph.nodes:
+                #     self.graph.add_node(name_out)
+                # for name_in in edges:
+                #     self.graph.add_edge(name_out, name_in)
+        for edge in edges:
+            to_add: bool = True
+            for node in edge:
+                if node in self.discarded_items:
+                    to_add = False
+                    continue
+                self.graph.add_node(node)
+            if len(edge) == 2 and to_add:
+                name_out, name_in = edge
+                self.graph.add_edge(name_out, name_in)
 
     def pick_best_isoforms(self) -> None:
         """
@@ -839,12 +888,13 @@ class AnnotationIntegrator(CommandLineManager):
         """
         # _all_names: Set[str] = set()
         gene_name2counter: Dict[str, int] = defaultdict(int)
-        if NX_VERSION < 2.4:
-            components = list(nx.connected_component_subgraphs(self.graph))
-        else:
-            components = [
-                self.graph.subgraph(c) for c in nx.connected_components(self.graph)
-            ]
+        # if NX_VERSION < 2.4:
+        #     components = list(nx.connected_component_subgraphs(self.graph))
+        # else:
+        #     components = [
+        #         self.graph.subgraph(c) for c in nx.connected_components(self.graph)
+        #     ]
+        components: List[nx.Graph] = get_connected_components(self.graph)
         with (
             open(self.gene_tsv, "w") as gt,
             open(self.gene_bed, "w") as gb,
@@ -852,11 +902,10 @@ class AnnotationIntegrator(CommandLineManager):
         ):
             gt.write(GENE_TSV_HEADER)
             for component in components:
-                # v = any("XM_047428684.1#NBPF6#165" in x for x in component)
                 ## initialize a temporary storage for initial candidates
-                selected: Dict[str, str] = {}
-                name2lines_selected: Dict[str, List[str]] = defaultdict(list)
-                ## define the best class
+                selected: Dict[str, str] = {} ## {BED line : projection name} mapping
+                name2lines_selected: Dict[str, List[str]] = defaultdict(list) ## the reverse: {name : [BED lines]}
+                ## define the best loss class
                 best_status: int = 0
                 ## set a semaphore for whether the user-defined loss classes
                 ## have been encountered in the clique
@@ -942,6 +991,7 @@ class AnnotationIntegrator(CommandLineManager):
                     for line in proj.cds_lines.values():
                         selected[line] = name
                     name2lines_selected[name] = list(proj.cds_lines.values())
+
                 ## now, process the paralogs
                 ## first, retrieve all the exon records
                 valid_exons: Dict[str, List[ExonRecord]] = defaultdict(list)
@@ -952,9 +1002,11 @@ class AnnotationIntegrator(CommandLineManager):
                 ## sort them chromwise
                 for chrom in valid_exons:
                     valid_exons[chrom].sort(key=lambda x: (x.start, x.end))
-                paralogs = sorted(
-                    paralogs, key=lambda x: self.query_projections[x].coords()
-                )
+                # paralogs = sorted(
+                #     paralogs, key=lambda x: self.query_projections[x].coordinates[chrom][:2]
+                # )
+                ## for better reproducibility, sort the paralog names
+                paralogs: List[str] = sorted(paralogs)
                 added_paralogs: Set[str] = set()
                 for paralog in paralogs:
                     proj: BedRecord = self.query_projections[paralog]
@@ -1007,32 +1059,32 @@ class AnnotationIntegrator(CommandLineManager):
                         continue
                     ## a projection with all segments already encountered,
                     ## it will definitely not add any new exons
-                    to_add: bool = False
-                    for paralog_exon in proj.exons:
-                        ## record the minimal overlap
-                        min_abs: int = paralog_exon.length()
-                        for valid_exon in valid_exons[proj.chrom]:
-                            if paralog_exon.end < valid_exon.start:
-                                break
-                            if paralog_exon.start > valid_exon.end:
-                                continue
-                            ## find the intersection size
-                            inter_size: int = intersection(
-                                paralog_exon.start,
-                                paralog_exon.end,
-                                valid_exon.start,
-                                valid_exon.end,
-                            )
-                            inter_size = max(inter_size, 0)
-                            min_abs = min(min_abs, paralog_exon.length() - inter_size)
-                        ## if at least one exon meets the requirements, add it to the output
-                        min_rel: float = safe_div(min_abs, paralog_exon.length())
-                        if (
-                            min_abs >= self.paralog_abs_novelty_threshold
-                            and min_rel >= self.paralog_rel_novelty_threshold
-                        ):
-                            to_add = True
-                            break
+                    to_add: bool = self._exon_novelty(proj, valid_exons)
+                    # for paralog_exon in proj.exons:
+                    #     ## record the minimal overlap
+                    #     min_abs: int = paralog_exon.length()
+                    #     for valid_exon in valid_exons[proj.chrom]:
+                    #         if paralog_exon.end < valid_exon.start:
+                    #             break
+                    #         if paralog_exon.start > valid_exon.end:
+                    #             continue
+                    #         ## find the intersection size
+                    #         inter_size: int = intersection(
+                    #             paralog_exon.start,
+                    #             paralog_exon.end,
+                    #             valid_exon.start,
+                    #             valid_exon.end,
+                    #         )
+                    #         inter_size = max(inter_size, 0)
+                    #         min_abs = min(min_abs, paralog_exon.length() - inter_size)
+                    #     ## if at least one exon meets the requirements, add it to the output
+                    #     min_rel: float = safe_div(min_abs, paralog_exon.length())
+                    #     if (
+                    #         min_abs >= self.paralog_abs_novelty_threshold
+                    #         and min_rel >= self.paralog_rel_novelty_threshold
+                    #     ):
+                    #         to_add = True
+                    #         break
                     if to_add:
                         for line in proj.cds_lines.values():
                             selected[line] = paralog
@@ -1046,7 +1098,8 @@ class AnnotationIntegrator(CommandLineManager):
                             valid_exons[exon.chrom].append(exon)
                     for chrom in valid_exons:
                         valid_exons[chrom].sort(key=lambda x: (x.start, x.end))
-                    ## now, the autism round starts
+                    ## sort the lost projections; the chromosome order is irrelevant, so it's safe to sort by name
+                    lost: List[str] = sorted(lost)
                     for lost_proj in lost:
                         proj: BedRecord = self.query_projections[lost_proj]
                         status: int = CLASS_TO_NUM[proj.loss_status]
@@ -1078,34 +1131,35 @@ class AnnotationIntegrator(CommandLineManager):
                                         break
                         if prev_is_better:
                             continue
-                        to_add: bool = False
-                        for lost_exon in proj.exons:
-                            ## record the minimal overlap
-                            min_abs: int = lost_exon.length()
-                            if min_abs == 0:
-                                continue
-                            for valid_exon in valid_exons[proj.chrom]:
-                                if lost_exon.end < valid_exon.start:
-                                    break
-                                if lost_exon.start > valid_exon.end:
-                                    continue
-                                ## find the intersection size
-                                inter_size: int = intersection(
-                                    lost_exon.start,
-                                    lost_exon.end,
-                                    valid_exon.start,
-                                    valid_exon.end,
-                                )
-                                inter_size = max(inter_size, 0)
-                                min_abs = min(min_abs, lost_exon.length() - inter_size)
-                            ## if at least one exon meets the requirements, add it to the output
-                            min_rel: float = safe_div(min_abs, lost_exon.length())
-                            if (
-                                min_abs >= self.lost_abs_novelty_threshold
-                                and min_rel >= self.lost_rel_novelty_threshold
-                            ):
-                                to_add = True
-                                break
+                        to_add: bool = self._exon_novelty(proj, valid_exons)
+                        # to_add: bool = False
+                        # for lost_exon in proj.exons:
+                        #     ## record the minimal overlap
+                        #     min_abs: int = lost_exon.length()
+                        #     if min_abs == 0:
+                        #         continue
+                        #     for valid_exon in valid_exons[proj.chrom]:
+                        #         if lost_exon.end < valid_exon.start:
+                        #             break
+                        #         if lost_exon.start > valid_exon.end:
+                        #             continue
+                        #         ## find the intersection size
+                        #         inter_size: int = intersection(
+                        #             lost_exon.start,
+                        #             lost_exon.end,
+                        #             valid_exon.start,
+                        #             valid_exon.end,
+                        #         )
+                        #         inter_size = max(inter_size, 0)
+                        #         min_abs = min(min_abs, lost_exon.length() - inter_size)
+                        #     ## if at least one exon meets the requirements, add it to the output
+                        #     min_rel: float = safe_div(min_abs, lost_exon.length())
+                        #     if (
+                        #         min_abs >= self.lost_abs_novelty_threshold
+                        #         and min_rel >= self.lost_rel_novelty_threshold
+                        #     ):
+                        #         to_add = True
+                        #         break
                         if to_add:
                             for line in proj.cds_lines.values():
                                 selected[line] = lost_proj
@@ -1118,15 +1172,16 @@ class AnnotationIntegrator(CommandLineManager):
                     x for x in filtered_component.nodes() if x not in selected.values()
                 }
                 filtered_component.remove_nodes_from(nodes_to_remove)
-                if NX_VERSION < 2.4:
-                    minor_components = list(
-                        nx.connected_component_subgraphs(filtered_component)
-                    )
-                else:
-                    minor_components = [
-                        filtered_component.subgraph(c)
-                        for c in nx.connected_components(filtered_component)
-                    ]
+                # if NX_VERSION < 2.4:
+                #     minor_components = list(
+                #         nx.connected_component_subgraphs(filtered_component)
+                #     )
+                # else:
+                #     minor_components = [
+                #         filtered_component.subgraph(c)
+                #         for c in nx.connected_components(filtered_component)
+                #     ]
+                minor_components: List[nx.Graph] = get_connected_components(filtered_component)
                 for minor_component in minor_components:
                     # all_projs: List[BedRecord] = [
                     #     self.query_projections[x] for x in selected.values()
@@ -1135,11 +1190,10 @@ class AnnotationIntegrator(CommandLineManager):
                     all_projs: List[BedRecord] = [
                         self.query_projections[x] for x in minor_component.nodes()
                     ]
-                    ## define the coordinates; that's the easy part
-                    chrom: str = all_projs[0].chrom
-                    strand: str = "+" if all_projs[0].strand else "-"
-                    start: int = min([x.start for x in all_projs])
-                    end: int = max([x.end for x in all_projs])
+                    # chrom: str = all_projs[0].chrom
+                    # strand: str = "+" if all_projs[0].strand else "-"
+                    # start: int = min([x.start for x in all_projs])
+                    # end: int = max([x.end for x in all_projs])
                     ## define the name; a slightly trickier part
                     ## first, define how many gene participate in the locus annotation
                     genes: Set[str] = {
@@ -1163,7 +1217,8 @@ class AnnotationIntegrator(CommandLineManager):
                         # if any(x.name in self.paralog_pool for x in all_projs):
                         prefix: str = "paralog_"
                         best_loss: str = max(
-                            [x.loss_status for x in all_projs], key=lambda x: CLASS_TO_NUM[x]
+                            [x.loss_status for x in all_projs],
+                            key=lambda x: CLASS_TO_NUM[x],
                         )
                         if best_loss in self.accepted_statuses:
                             self.num_para += 1
@@ -1191,34 +1246,48 @@ class AnnotationIntegrator(CommandLineManager):
                     gene_name2counter[name] += 1
                     if gene_name2counter[name] > 1:
                         name += f"_{gene_name2counter[name]}"
-                    all_species: Set[str] = {self.query_proj2ref[x] for x in minor_component.nodes()}
+                    all_species: Set[str] = {
+                        self.query_proj2ref[x] for x in minor_component.nodes()
+                    }
                     self.gene2species[name] = all_species
                     for _spec in all_species:
                         self.species2num_item[_spec] += 1
                         if not prefix:
                             self.species2num_genes[_spec] += 1
-                    ## done! now, write the output
-                    ## for gene BED, it's a single line
-                    gene_bed: str = "\t".join(
-                        map(str, [chrom, start, end, name, 0, strand])
-                    )
-                    gb.write(gene_bed + "\n")
-                    ## then, iterate over projection
-                    _num_proj: int = 0
-                    for proj in all_projs:
-                        basename: str = base_proj_name(proj.name)
-                        self.final_projections.add(basename)
-                        ## get the reference name and add it as a prefix
-                        species: str = self.query_proj2ref[proj.name]
-                        ## gene isoform file; write the gene and projections names
-                        gt.write(name + "\t" + proj.name + "\n")
-                        ## projection BED file; write the original BED line
-                        # for proj_bed in proj.return_bed_line(prefix=species):
-                        for proj_bed in proj.return_bed_line():
-                            qb.write(proj_bed + "\n")
-                        _num_proj += 1
-                    if _num_proj == 0:
-                        self._to_log("No projections for gene %s" % name, "warning")
+                    ## find all chromosomes the component projections are annotated at
+                    all_chroms: Set[str] = {x for y in all_projs for x in y.coordinates}
+                    for chrom in all_chroms:
+                        chrom_projs: List[BedRecord] = [x for x in all_projs if chrom in x.coordinates]
+                        start: int = min(
+                            [x.coordinates[chrom][0] for x in chrom_projs]
+                        )
+                        end: int = max(
+                            [x.coordinates[chrom][1] for x in chrom_projs]
+                        )
+                        ## strand is guaranteed to coincide for all projections on the same chromosome
+                        strand: str = "+" if chrom_projs[0].coordinates[chrom][2] else "-"
+                        ## done! now, write the output
+                        ## for gene BED, it's a single line
+                        gene_bed: str = "\t".join(
+                            map(str, [chrom, start, end, name, 0, strand])
+                        )
+                        gb.write(gene_bed + "\n")
+                        ## then, iterate over projection
+                        _num_proj: int = 0
+                        for proj in chrom_projs:#all_projs:
+                            basename: str = base_proj_name(proj.name)
+                            self.final_projections.add(basename)
+                            ## get the reference name and add it as a prefix
+                            species: str = self.query_proj2ref[proj.name]
+                            ## gene isoform file; write the gene and projections names
+                            gt.write(name + "\t" + proj.name + "\n")
+                            ## projection BED file; write the original BED line
+                            # for proj_bed in proj.return_bed_line(prefix=species):
+                            for proj_bed in proj.return_bed_line():
+                                qb.write(proj_bed + "\n")
+                            _num_proj += 1
+                        if _num_proj == 0:
+                            self._to_log("No projections for gene %s" % name, "warning")
 
     def prepare_gtf(self) -> None:
         """
@@ -1255,14 +1324,16 @@ class AnnotationIntegrator(CommandLineManager):
     def generate_support_matrix(self) -> None:
         """
         Generates a reference support matrix for all the inferred genes
-        
+
         Args:
             None
 
         Returns:
             None
         """
-        sorted_refs: List[str] = sorted(self.ref_data.keys(), key=lambda x: self.ref_data[x].priority)
+        sorted_refs: List[str] = sorted(
+            self.ref_data.keys(), key=lambda x: self.ref_data[x].priority
+        )
         header: str = "gene\t" + "\t".join(sorted_refs)
         with open(self.support_matrix_file, "w") as h:
             h.write(header + "\n")
@@ -1293,9 +1364,9 @@ class AnnotationIntegrator(CommandLineManager):
             ref_genes: int = self.species2num_genes[ref]
             gene_perc: int = to_perc(ref_genes, self.num_genes)
             refs += REF_SUPPORT_LINE.format(
-                ref=ref, 
-                ref_genes=ref_genes, 
-                all_genes=self.num_genes, 
+                ref=ref,
+                ref_genes=ref_genes,
+                all_genes=self.num_genes,
                 gene_perc=gene_perc,
             )
         with open(self.summary, "w") as h:
@@ -1544,6 +1615,51 @@ class AnnotationIntegrator(CommandLineManager):
             entry: str = f">{ref}.{header}\n{seq}"
             sequences.append(entry)
         return sequences
+    
+    def _exon_novelty(
+        self, 
+        proj: BedRecord, 
+        valid_exons: Dict[str, List[ExonRecord]]
+    ) -> None:
+        """
+        Assesses whether of the projection's exons contains enough unique sequence 
+        compared to the existing exon pool to qualify as novelty.
+
+        Args:
+            *proj*: BedRecord instance of a candidate projection
+            *valid_exons*: {chromosome: [ExonRecord]} mapping of already selected exon items. 
+            ExonRecord items are expected to be sorted by coordinates
+        
+        Returns:
+            True if exon satisfies the minimal novel sequence criteria, False otherwise
+        """
+        for exon in proj.exons:
+            ## record the minimal overlap
+            min_abs: int = exon.length()
+            if min_abs == 0:
+                continue
+            for valid_exon in valid_exons[exon.chrom]:
+                if exon.end < valid_exon.start:
+                    break
+                if exon.start > valid_exon.end:
+                    continue
+                ## find the intersection size
+                inter_size: int = intersection(
+                    exon.start,
+                    exon.end,
+                    valid_exon.start,
+                    valid_exon.end,
+                )
+                inter_size = max(inter_size, 0)
+                min_abs = min(min_abs, exon.length() - inter_size)
+            ## if at least one exon meets the requirements, add it to the output
+            min_rel: float = safe_div(min_abs, exon.length())
+            if (
+                min_abs >= self.lost_abs_novelty_threshold
+                and min_rel >= self.lost_rel_novelty_threshold
+            ):
+                return True
+        return False
 
     def set_logging(self) -> None:
         """Sets logging and disables logging propagation"""
