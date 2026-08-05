@@ -2748,8 +2748,8 @@ class ProcessedSegment:
                 continue
             if exon not in self.abs_exon_coords:
                 raise ValueError(
-                    "No absolute coordinates recorded for exon %i in projection %s" 
-                    % (exon, self.name)
+                    "No absolute coordinates recorded for exon %i in transcript %s, chain %s" 
+                    % (exon, self.transcript, p.chain)
                 )
             aln_start, aln_stop = self.abs_exon_coords[exon].tuple()
             start: int = min(space_start, aln_start)
