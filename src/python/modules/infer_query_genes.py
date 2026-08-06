@@ -998,10 +998,6 @@ class QueryGeneCollapser(CommandLineManager):
                 self._die(
                     "Projection clique %i consists entirely of redundant entities" % i
                 )
-            visited: List[str] = []
-            starts: Dict[str, int] = {}
-            stops: Dict[str, int] = {}
-            strands: Dict[str, bool] = {}
             # paralog locus filtering if --annotate_paralogs is set
             if all(x in self.paralog_list for x in c.nodes()):
                 have_orthologs: List[str] = [
@@ -1181,6 +1177,10 @@ class QueryGeneCollapser(CommandLineManager):
             ## 1) think of how to store transcript-to-chromosome mapping
             ## 2) think of how to resolve multiple chromosomes in
             for cc in c:
+                visited: List[str] = []
+                starts: Dict[str, int] = {}
+                stops: Dict[str, int] = {}
+                strands: Dict[str, bool] = {}
                 for tr in cc:
                     if tr in visited:
                         continue
