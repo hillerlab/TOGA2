@@ -559,8 +559,8 @@ class QueryGeneCollapser(CommandLineManager):
             if chrom not in found_chroms:
                 self.tr2chrom[proj] = (*found_chroms, chrom)
             ## do not save the exon coordinates for exons not supported by the chain
-            gap_supported: bool = data[-3] == "CHAIN_SUPPORTED"
-            if not gap_supported:
+            chain_supported: bool = data[-3] == "CHAIN_SUPPORTED"
+            if not chain_supported:
                 continue
             self.tr2exons[proj][exon] = Coords(str(exon), chrom, start, end, strand)
         for proj in annotated_projections:
