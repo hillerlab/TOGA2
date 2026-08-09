@@ -15,7 +15,7 @@
 * **NEW COMPANION PIPELINE**: `toga2kbpython` for estimating gene expression with `kb-python` and TOGA2 output (`v2.0.9d`; early access).
 * **NEW COMPANION SCRIPT**: `toga2stats` for assembly quality assessment based on the ancestral gene set.
 * Companion dataset:
-    * Adding input annotation for two turtle (*Emydura macquarii macquarii*, *Emys orbicularis*) and five percomoprh fishes (*Gasterosteus aculeatus*, *Hippoglossus stenolepis*, *Melanotaenia boesemani*, *Nothobranchius furzeri*, *Synchiropus splendidus*) reference species.
+    * Adding input annotation for two turtle (*Emydura macquarii macquarii*, *Emys orbicularis*) and five percomoprh fish (*Gasterosteus aculeatus*, *Hippoglossus stenolepis*, *Melanotaenia boesemani*, *Nothobranchius furzeri*, *Synchiropus splendidus*) reference species.
 * Minor changes:
     * `prepare-input` mode:
         * Colon (":") symbol now accepted in gene/transcript names (also applies to `run` mode)
@@ -42,6 +42,8 @@
             * Speeding up alignment step results aggregation;
     * `integrate` mode:
         * `integrate.py`:
+            * fixed bugs causing gene fragmentation and gene number inflation;
+            * fixed fluctuating projection pick for lost and paralogous projections;
             * fixed sequence name check for decorator files in `prepare_decorator_track()`;
     * Companion dataset:
         * Adding SLEASY 2bit exon files, GTF files, and gene BED files for all references.
