@@ -60,7 +60,6 @@ NAME: str = "name"
 TYPE_ID: str = "type_id"
 DEFAULT_CLASS_COL: int = 12
 
-
 GENE_BED_LINE: str = "{chrom}\t{start}\t{end}\t{name}\t1000\t{strand}\n"
 BED_LINE: str = "{chrom}\t{start}\t{end}\t{name}\t0\t{strand}\t{cds_start}\t{cds_end}\t0,0,0,\t{exon_num}\t{sizes}\t{starts}\n"
 ISOFORM_LINE: str = "{gene}\t{tr}\n"
@@ -742,6 +741,7 @@ class InputProducer(CommandLineManager):
                 )
             for field in NUMERIC_FIELDS:
                 if not data[field].replace(",", "").isdigit():
+
                     self._die(
                         (
                             "Improper formatting at reference annotation file line %i; "
@@ -1131,12 +1131,10 @@ class InputProducer(CommandLineManager):
                         prev_name = name
                     exon: int = int(exon)
                     if name != prev_name and prev_name:
-                        # print(f'{prev_name=}, {name=}, {prev_exon=}, {exon=}')
                         h.write(">" + prev_name + "\n" + curr_seq + "\n")
                         curr_seq = ""
                         prev_name = name
                         prev_exon = 0
-                        # print(f'{prev_name=}, {name=}, {prev_exon=}, {exon=}')
                     if prev_exon >= exon:
                         self._die(
                             (

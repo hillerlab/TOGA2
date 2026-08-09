@@ -24,7 +24,7 @@ class Gxf:
     TR_ID: str = "transcript_id"
     TR_PREFICES: Tuple[str, ...] = ("transcript:", "rna-", "gene-",)
     EXON_PARENTS: Tuple[str, ...] = ("transcript_id", PARENT, ID,)
-    TR_PARENTS: Tuple[str, ...] = ("gene_name", "gene", "gene_id", "Name", ID,)
+    TR_PARENTS: Tuple[str, ...] = ("gene_id", "gene_name", "gene", "Name", ID,)#("gene_name", "gene", "gene_id", "Name", ID,)
     CODING_TAGS: Tuple[str, str] = ("mRNA", "protein_coding", "transcript",)
     VDJ_TAGS: Tuple[str, ...] = ("V_segment", "C_region", "V_gene_segment", "C_gene_segment",)
 

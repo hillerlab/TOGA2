@@ -240,7 +240,7 @@ fn main() {
                 None => {continue}
             };
             let proj: &str = bed_entry.name().unwrap();
-            // skip fragmented projections - TOGA2 currently does not support 
+            // skip fragmented projections - TOGA2 currently does not support them
             if proj.contains(',') {continue};
             if let Some(muts) = proj2muts.get(proj) {
                 // extract projection values needed for the mutation Bed record
@@ -296,28 +296,36 @@ fn main() {
                     // point mutations have a total length of 1; 
                     // meanwhile, mutation files provided affected codon's coordinate;
                     // therefore, one has to first infer the exact coordinate
-                    let mut first_coord: u64 = match mutation.exon.contains('_') {
-                        true => {
-                            // mutation spans over multiple exons;
-                            // acceptors should be mapped to mutation's end,
-                            // the rest go to the first coordinate as always
-                            if &mutation.mut_type == ACCEPTOR {
-                                if strand {mutation.end} else {mutation.start}
-                            } else {
-                                if strand {mutation.start} else {mutation.end}
-                            }
-                        },
-                        false => {
-                            // mutation occurs within one exon;
-                            // unless it is a donor mutation, simply place it 
-                            // at the beginning of the codon
-                            if &mutation.mut_type == DONOR {
-                                if strand {mutation.end} else {mutation.start}
-                            } else {
-                                if strand {mutation.start} else {mutation.end}
-                            }
-                        }
+                    // let mut first_coord: u64  = if strand {mutation.end} else {mutation.start};
+                    let mut first_coord: u64 = if &mutation.mut_type == ACCEPTOR {
+                        if strand {mutation.end} else {mutation.start}
+                    } else {
+                        if strand {mutation.start} else {mutation.end}
                     };
+                    // let mut first_coord: u64 = match mutation.exon.contains('_') {
+                        // true => {
+                        //     // mutation spans over multiple exons;
+                        //     // acceptors should be mapped to mutation's end,
+                        //     // the rest go to the first coordinate as always
+                        //     if &mutation.mut_type == ACCEPTOR {
+                        //         if strand {mutation.end} else {mutation.start}
+                        //     } else {
+                        //         if strand {mutation.start} else {mutation.end}
+                        //     }
+                        // },
+                        // false => {
+                        //     // mutation occurs within one exon;
+                        //     // simply place it at the beginning of the codon
+                        //     // NOTE: before v2.0.9e, donor mutations glyphs 
+                        //     // were placed at the second position, creating an awkward gap
+                        //     // if &mutation.mut_type == DONOR {
+                        //     //     if strand {mutation.end} else {mutation.start}
+                        //     // } else {
+                        //     //     if strand {mutation.start} else {mutation.end}
+                        //     // }
+                        //     if strand {mutation.start} else {mutation.end}
+                        // }
+                    // };
                     let mut last_coord: u64 = first_coord + 1;
                     if last_coord >= chrom_size {
                         last_coord = chrom_size - 1;
