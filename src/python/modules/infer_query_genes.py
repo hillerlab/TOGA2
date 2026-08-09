@@ -852,7 +852,8 @@ class QueryGeneCollapser(CommandLineManager):
                     ## edges starting in it can be safely added to the graph
                     # if proj_out.start > proj_in.end:
                     if proj_out.end < proj_in.start:
-                        ## retrogenes/processed pseudogenes do not participate in gene inference
+                        ## processed pseudogenes do not participate in gene inference
+                        ## but retrogenes do
                         if not out_is_pseudo or out_is_intact:  # and not was_discarded:
                             if graph_name_out not in graph.nodes:
                                 graph.add_node(graph_name_out)
@@ -876,18 +877,6 @@ class QueryGeneCollapser(CommandLineManager):
                         proj_in.name in self.proc_pseudogene_list
                         or basename_in in self.proc_pseudogene_list
                     )
-                    # in_non_orth: bool = in_is_paralog or in_is_pseudo
-                    # if in_is_pseudo:
-                    #     continue
-                    # if out_non_orth != in_non_orth:
-                    #     self.discarded_paralogs.add(proj_out.name if out_non_orth else proj_in.name)
-                    #     continue
-                    # if "," in proj_in.name:
-                    #     sufficient_exon_cov_in: bool = True
-                    # else:
-                    #     sufficient_exon_cov_in: bool = (
-                    #         not self._overextended_projection(proj_in.name)
-                    #     )
                     tr_in: str = get_orig_transcript(proj_in.name)
                     tr_out: str = get_orig_transcript(proj_out.name)
                     gene_in: str = self.ref_isoform2gene.get(tr_in, "")
@@ -904,23 +893,15 @@ class QueryGeneCollapser(CommandLineManager):
                                 % (proj_out.name, proj_in.name, gene_out, gene_in),
                             )
                             continue
-                    ## do not overlap insufficiently covered second-best projections
-                    # if sufficient_exon_cov_out != sufficient_exon_cov_in and gene_out != gene_in:
-                    #     continue
                     ## to ensure that projections from the same transcript/gene
                     ## are grouped regardless of their overlap by coding bases
                     ## if they overlap by absolute CDS coordinates,
                     ## set has_intersection to equality of ref progenitor genes
-                    has_intersection: bool = gene_in == gene_out  # False
-                    # for exon1 in proj_out.exons.values():
-                    #     e_start1, e_stop1 = exon1.start, exon1.stop
+                    has_intersection: bool = gene_in == gene_out != ""
                     for exon1 in sorted(
                         self.tr2exons[proj_out.name].values(), key=lambda x: x.start
                     ):
                         e_start1, e_stop1 = exon1.start, exon1.end
-                        # e1_50p: int = int((e_stop1 - e_start1) * 0.5)
-                        # for exon2 in proj_in.exons.values():
-                        #     e_start2, e_stop2 = exon2.start, exon2.stop
                         for exon2 in sorted(
                             self.tr2exons[proj_in.name].values(), key=lambda x: x.start
                         ):
@@ -931,13 +912,11 @@ class QueryGeneCollapser(CommandLineManager):
                                 continue
                             if e_stop1 < e_start2:
                                 break
-                            # e2_50p: int = int((e_stop2 - e_start2) * 0.5)
                             inter_size: int = intersection(
                                 e_start1, e_stop1, e_start2, e_stop2
                             )
                             ## at least two exons intersect plausibly,
                             ## no need to check for others
-                            # if inter_size >= e1_50p and inter_size >= e2_50p:
                             if inter_size > 0:
                                 has_intersection = True
                                 break
