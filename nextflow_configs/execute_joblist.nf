@@ -2,14 +2,7 @@
 
 nextflow.enable.dsl=2
 
-params.joblist = 'NONE'  // file containing jobs
-
-if (params.joblist == "NONE"){
-    println("Usage: nextflow execute_joblist.nf  --joblist [joblist file] -c [config file]")
-    System.exit(2);
-}
-
-lines = Channel.fromPath(params.joblist).splitText()
+params.joblist = 'NONE'
 
 process execute_jobs {
 
@@ -27,5 +20,11 @@ process execute_jobs {
 }
 
 workflow {
+    if (params.joblist == "NONE"){
+        println("Usage: nextflow execute_joblist.nf  --joblist [joblist file] -c [config file]")
+        System.exit(2);
+    }
+
+    def lines = Channel.fromPath(params.joblist).splitText()
     execute_jobs(lines)
 }
