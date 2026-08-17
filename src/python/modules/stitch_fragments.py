@@ -1,24 +1,30 @@
 #!/usr/bin/env python3
-""" """
+"""
+Assembles projections from fragments scattered across different contigs in the query assembly
+"""
 
-import os
+# import os
+# import sys
+
+# LOCATION: str = os.path.dirname(os.path.abspath(__file__))
+# PARENT: str = os.sep.join(LOCATION.split(os.sep)[:-1])
+# sys.path.extend([LOCATION, PARENT])
+
 import sys
-
-LOCATION: str = os.path.dirname(os.path.abspath(__file__))
-PARENT: str = os.sep.join(LOCATION.split(os.sep)[:-1])
-sys.path.extend([LOCATION, PARENT])
-
 from collections import defaultdict
-from datetime import datetime as dt
-from typing import Dict, List, Optional
+from collections.abc import Iterable
+from dataclasses import dataclass
+from os import PathLike
+from typing import Any, TextIO
 
 import click
 
 from .constants import Headers
 from .shared import (
     CONTEXT_SETTINGS,
-    flatten,
-    make_cds_track,
+    CommandLineManager,
+    intersection,
+    read_tab,
 )  ## TODO: most of legacy T1 code in this import line is no longer needed; remove in the stable version
 
 # artificial 0-scored points
@@ -26,23 +32,53 @@ SOURCE = "SOURCE"
 SINK = "SINK"
 SCORE_THRESHOLD = 0.5
 EXON_COV_THRESHOLD = 1.33
-MAX_OVERLAP = 250  # TODO: check whether 250 is a good option
+MAX_OVERLAP = 250  # TODO: check whether 250 is a plausible value
+CHAIN: str = "chain"
+TRANSCRIPT: str = "transcript"
 
 __author__ = "Ekaterina Osipova & Bogdan M. Kirilenko"
 __credits__ = "Yury V. Malovichko"
 __year__ = "2024"
-__all__ = None
+__all__ = ()
+
+
+def all_unique(collection: Iterable[Any]) -> bool:
+    """
+    Check if all members in a collection are unique.
+    Based on solution from https://stackoverflow.com/questions/5278122
+
+    Args:
+        collection: an iterable collection of arbitrary elements
+
+    Returns:
+        bool: True if all elements are unique, False otherwise
+    """
+    ## TODO: Move to src.python.modules.shared before the release
+    seen: set[Any] = set()
+    return not any(x in seen or seen.add(x) for x in collection)
+
+
+@dataclass
+class ChainData:
+    __slots__ = ("chrom", "end", "id", "score", "start")
+    id: str
+    chrom: str
+    start: int
+    end: int
+    score: float
 
 
 class Vertex:
+    __slots__ = ("children", "chrom", "end", "name", "score", "start")
     """Graph vertex."""
 
-    def __init__(self, name, start, end, score):
-        self.name = name
-        self.start = start
-        self.end = end
-        self.score = score
-        self.children = list()
+    def __init__(self, name: str, chrom: str, start: int, end: int, score: float) -> None:
+        self.name: str = name
+        self.chrom: str = chrom
+        self.start: int = start
+        self.end: int = end
+        self.score: float = score
+        self.children: list[str] = []
 
     def add_child(self, v):
         if v not in self.children:
@@ -84,7 +120,7 @@ class Graph:
         # add current vertex to stack
         stack.insert(0, v)
 
-    def topological_sort(self):
+    def topological_sort(self) -> list[int]:
         """Perform topological sort.
 
         Use recursive function topological_sort_util().
@@ -99,281 +135,76 @@ class Graph:
         # return sorted list of vertices
         return stack
 
-    def __repr__(self):
+    def add_source_sink_graph(self) -> None:
+        """Add artificial Source and Sink vertices to the chain graph.
+
+        Assign them zero length and zero score.
+        """
+        source_end = min([self.vertices[vertex].start for vertex in self.vertices])
+        source_start = source_end
+        sink_start = max([self.vertices[vertex].end for vertex in self.vertices])
+        sink_end = sink_start
+        self.add_vertex(Vertex(SOURCE, "", source_start, source_end, 0))
+        self.add_vertex(Vertex(SINK, "", sink_start, sink_end, 0))
+
+        ## add edges from source to each vertex
+        for vertex in self.vertices:
+            if vertex != SOURCE:
+                self.add_edge(SOURCE, vertex)
+
+        ## add edges from each vertex to sink
+        for vertex in self.vertices:
+            if vertex != SINK:
+                self.add_edge(vertex, SINK)
+
+    def find_shortest_path(
+        self, 
+        sorted_vertices: list[int], 
+        diff_contigs_only: bool
+    ) -> tuple[float, list[int]]:
+        """Find the shortest path in directed acyclic graph.
+
+        Initiate dictionary with the shortest paths to each node:
+        {vertex: (value, path itself)}.
+        """
+        shortest_paths = {}
+        for sorted_vertex in sorted_vertices:
+            shortest_paths[sorted_vertex] = (0, [SOURCE])
+
+        ## check each child of the current vertex
+        ## and update shortest path to this vertex in the dictionary
+        for sorted_vertex in sorted_vertices:
+            children = self.vertices[sorted_vertex].children
+            for child in children:
+                current_score: float = shortest_paths[child][0]
+                path_score: float = shortest_paths[sorted_vertex][0]
+                path: list[str] = shortest_paths[sorted_vertex][1]
+                child_score = self.vertices[child].score
+                upd_score = path_score + child_score
+                if diff_contigs_only:
+                    all_chroms: list[str] = [self.vertices[x].chrom for x in path]
+                    all_chroms.append(self.vertices[sorted_vertex].chrom)
+                    all_chroms.append(self.vertices[child].chrom)
+                    all_chroms = [x for x in all_chroms if x]
+                    all_chroms_unique: bool = all_unique(all_chroms)
+                    # print(f"{all_chroms=}, {all_chroms_unique=}")
+                else:
+                    all_chroms_unique: bool = True
+                ## update the current path to the child
+                ## if its score is lower than current recorded one
+                if upd_score < current_score and all_chroms_unique:
+                    new_path = list(shortest_paths[sorted_vertex][1])
+                    if sorted_vertex not in new_path:
+                        new_path.append(sorted_vertex)
+                    shortest_paths[child] = (upd_score, new_path)
+        return shortest_paths[SINK]
+
+    def __repr__(self) -> str:
         lines = []
-        for elem in self.vertices.keys():
+        for elem in self.vertices:
             line = f"{elem}\t{self.vertices[elem].children}\n"
             lines.append(line)
         return "".join(lines)
-
-
-def read_gene_scores(score_file: str, threshold: float) -> Dict[str, List[str]]:
-    """Read orthology_score.tsv file into a dict.
-    Dict structure is:
-    {transcript_id : [(chain, score), (chain2, score2), ..] }.
-    """
-    ret = defaultdict(list)
-    f = open(score_file, "r")
-    f.__next__()  # skip header
-    for line in f:
-        line_data = line.rstrip().split()
-        transcript = line_data[0]
-        chain_id = int(line_data[1])
-        chain_score = float(line_data[2])
-        if chain_score < threshold:
-            continue
-        item = (chain_id, chain_score)
-        ret[transcript].append(item)
-    f.close()
-    return ret
-
-
-def read_chain_file(chain_file):
-    """Read chain file.
-
-    Create dict chain_id: (start, end)."""
-    ret = {}
-    f = open(chain_file, "r")
-    for line in f:
-        if not line.startswith("chain"):
-            continue
-        line_data = line.rstrip().split()
-        start = int(line_data[5])
-        end = int(line_data[6])
-        chain_id = int(line_data[12])
-        ret[chain_id] = (start, end)
-    f.close()
-    return ret
-
-
-def read_gene_loci(bed_file):
-    """For each bed entry get coding locus."""
-    # TODO: not the most optimal solution, fix it
-    ret = {}
-    f = open(bed_file, "r")
-    for line in f:
-        cds_line = make_cds_track(line).split("\t")
-        # extract absolute exon coordinates
-        chrom_start = int(cds_line[1])
-        name = cds_line[3]
-        if name.endswith("_CDS"):
-            name = name[:-4]
-        # TODO: fix duplicated code fragment
-        block_count = int(cds_line[9])
-        block_sizes = [int(x) for x in cds_line[10].split(",") if x != ""]
-        block_starts = [int(x) for x in cds_line[11].split(",") if x != ""]
-        block_ends = [block_starts[i] + block_sizes[i] for i in range(block_count)]
-        block_abs_starts = [block_starts[i] + chrom_start for i in range(block_count)]
-        block_abs_ends = [block_ends[i] + chrom_start for i in range(block_count)]
-        exon_nums = list(range(block_count))
-        exon_coords = list(zip(exon_nums, block_abs_starts, block_abs_ends))
-        ret[name] = exon_coords
-    f.close()
-    return ret
-
-
-def build_chain_graph(chain_id_to_loc, intersecting_chains_wscores):
-    """Build chain graph.
-
-    Read chains and corresponding scores into
-    a chain dictionary {chain: (start, end, score)}.
-    """
-    chain_graph = Graph()
-    # add all vertices to the chain graph
-    for chain_id, score in intersecting_chains_wscores:
-        start, end = chain_id_to_loc.get(chain_id, (None, None))
-        if start is None:
-            raise ValueError(f"Cannot find chain {chain_id}")
-        v = Vertex(chain_id, start, end, -1 * score)
-        chain_graph.add_vertex(v)
-
-    # add edges to the chain graph
-    for i in chain_graph.vertices:
-        for j in chain_graph.vertices:
-            if i == j:
-                # no need to connect the point to itself
-                continue
-            i_vertex = chain_graph.vertices[i]
-            j_vertex = chain_graph.vertices[j]
-            # allow some overlap between chains
-            # defined in the MAX_OVERLAP constant
-            i_vertex_and_flank = i_vertex.end - MAX_OVERLAP
-            if i_vertex_and_flank <= j_vertex.start:
-                chain_graph.add_edge(i_vertex.name, j_vertex.name)
-    return chain_graph
-
-
-def add_source_sink_graph(graph_name):
-    """Add artificial Source and Sink vertices to the chain graph.
-
-    Assign them zero length and zero score.
-    """
-    source_end = min(
-        [graph_name.vertices[vertex].start for vertex in graph_name.vertices]
-    )
-    source_start = source_end
-    sink_start = max(
-        [graph_name.vertices[vertex].end for vertex in graph_name.vertices]
-    )
-    sink_end = sink_start
-    graph_name.add_vertex(Vertex(SOURCE, source_start, source_end, 0))
-    graph_name.add_vertex(Vertex(SINK, sink_start, sink_end, 0))
-
-    # add edges from Source to each vertex
-    for vertex in graph_name.vertices:
-        if vertex != SOURCE:
-            graph_name.add_edge(SOURCE, vertex)
-
-    # add edges from each vertex to Sink
-    for vertex in graph_name.vertices:
-        if vertex != SINK:
-            graph_name.add_edge(vertex, SINK)
-    return  # all
-
-
-def find_shortest_path(graph_name, source, sink, sorted_vertices):
-    """Find the shortest path in directed acyclic graph.
-
-    Initiate dictionary with the shortest paths to each node:
-    {vertex: (value, path itself)}.
-    """
-    shortest_paths = {}
-    for sorted_vertex in sorted_vertices:
-        shortest_paths[sorted_vertex] = (0, [source])
-
-    # check each child of the current vertex
-    # and update shortest path to this vertex in the dictionary
-    for sorted_vertex in sorted_vertices:
-        children = graph_name.vertices[sorted_vertex].children
-        for child in children:
-            current_score = shortest_paths[child][0]
-            sp_sv_0 = shortest_paths[sorted_vertex][0]
-            gn_sv_s = graph_name.vertices[child].score
-            score_if_updated = sp_sv_0 + gn_sv_s
-            if score_if_updated < current_score:
-                new_path = list(shortest_paths[sorted_vertex][1])
-                if sorted_vertex not in new_path:
-                    new_path.append(sorted_vertex)
-                shortest_paths[child] = (score_if_updated, new_path)
-    return shortest_paths[sink]
-
-
-def check_exon_coverage(chains, chain_id_to_loc, exons_loci):
-    """For each chain check whether it intersects all gene exons."""
-    exon_num = len(exons_loci)
-    chain_id_coverage = {}
-    for chain_id in chains:
-        # for each chain create a bool list indicating what exon
-        # it intersects
-        # remove exons where end < chain_start
-        # and exon start > chain_end
-        chain_loc = chain_id_to_loc[chain_id]
-        intersect_exon_nums = [
-            x[0] for x in exons_loci if x[2] > chain_loc[0] and x[1] < chain_loc[1]
-        ]
-        bool__exon_cov = [False for _ in range(exon_num)]
-        for i in intersect_exon_nums:
-            bool__exon_cov[i] = True
-        # bool__exon_cov = [intersect(e, chain_loc) > 0 for e in exons_loci]
-        chain_id_coverage[chain_id] = bool__exon_cov
-    return chain_id_coverage
-
-
-def get_average_exon_cov(chain_to_exon_cov, exon_num):
-    """Compute average exon coverage."""
-    exon_cov = [0 for _ in range(exon_num)]
-    for coverage in chain_to_exon_cov.values():
-        # there are bool values in coverage
-        # covert them to int such as True = 1 and False = 0
-        coverage_numeric = [1 if c else 0 for c in coverage]
-        for i in range(exon_num):
-            exon_cov[i] += coverage_numeric[i]
-    average_cov = sum(exon_cov) / exon_num
-    return average_cov
-
-
-def stitch_scaffolds(
-    chain_file: str,
-    chain_scores_file: str,
-    bed_file: str,
-    orthology_threshold: Optional[float] = SCORE_THRESHOLD,
-    fragments_only: Optional[bool] = False,
-) -> Dict[str, str]:
-    """Stitch chains of fragmented orthologs."""
-    # to_log("stitch_fragments: started stitching fragmented orthologous loci (if any)")
-    transcript_score_dict = read_gene_scores(chain_scores_file, orthology_threshold)
-    # func read_chain_file returns data about all chains in the file
-    # however, we need only orthologous ones
-    # to avoid contamination with paralogous chains we further filter the
-    # chain_id_to_loc dictionary
-    # transcript score dict: gene_id: [(chain, score), (chain, score), ...]
-    # Iterate over dict values (lists of tuples), get the 1st elem of each tuple (chain_id)
-    orth_chains = set(
-        flatten([v[0] for v in vals] for vals in transcript_score_dict.values())
-    )
-    # to_log(f"stitch fragments: processing total of {len(orth_chains)} chains with scores")
-    chain_id_to_loc__no_filt = read_chain_file(chain_file)
-    chain_id_to_loc = {
-        k: v for k, v in chain_id_to_loc__no_filt.items() if k in orth_chains
-    }
-    genes_to_exon_coords = read_gene_loci(bed_file)
-    transcript_to_path = {}
-    task_size = len(transcript_score_dict.keys())
-    # to_log(f"stitch fragments: processing {task_size} transcripts")
-    count = 1
-
-    for transcript, intersecting_chains_wscores in transcript_score_dict.items():
-        count += 1
-        if len(intersecting_chains_wscores) <= 1:
-            continue
-        # intersecting chains: list of tuples
-        # [(chain, score), (chain, score), ...]
-        # chains that intersect this transcript
-        exon_coords = genes_to_exon_coords.get(transcript)
-        if exon_coords is None:
-            # must never happen
-            err_msg = f"Cannot find a bed track for {transcript}"
-            # to_log(f"stitch fragments: FATAL ERROR {err_msg}")
-            raise ValueError(err_msg)
-        # extract some extra information about exon coverage
-        intersecting_chains = [x[0] for x in intersecting_chains_wscores]
-        chain_id_to_exon_cov = check_exon_coverage(
-            intersecting_chains, chain_id_to_loc, exon_coords
-        )
-        chain_id_covers_all = {
-            k: all(v for v in val) for k, val in chain_id_to_exon_cov.items()
-        }
-        if any(chain_id_covers_all.values()):
-            # if there is a chain that covers the transcript entirely: skip this
-            continue
-        average_exon_coverage = get_average_exon_cov(
-            chain_id_to_exon_cov, len(exon_coords)
-        )
-        if average_exon_coverage > EXON_COV_THRESHOLD:
-            # skip if each exon is covered > EXON_COV_THRESHOLD times in average
-            continue
-        # Initiate chain graph
-        chain_graph = build_chain_graph(chain_id_to_loc, intersecting_chains_wscores)
-        add_source_sink_graph(chain_graph)
-
-        # Topologically sort chain graph
-        sorted_vertices = chain_graph.topological_sort()
-
-        # Find 'longest' (=highest scoring) path in the graph =
-        # find the shortest path in the graph with negative scoring vertices.
-        longest_path_chain_graph = find_shortest_path(
-            chain_graph, SOURCE, SINK, sorted_vertices
-        )
-        _, _path = longest_path_chain_graph
-        path = _path[1:]  # starts with [SOURCE, ... ]
-        if fragments_only and len(path) < 2:
-            # this transcript is covered entirely by a single chain
-            continue
-        # to_log(f"stitch fragments: transcript {transcript} is potentially fragmented")
-        transcript_to_path[transcript] = path
-        del chain_graph
-    # to_log(f"stitch fragments: identified {len(transcript_to_path)} fragmented transcripts")
-    return transcript_to_path
 
 
 @click.command(context_settings=CONTEXT_SETTINGS, no_args_is_help=True)
@@ -402,35 +233,342 @@ def stitch_scaffolds(
     "-ot",
     type=float,
     metavar="FLOAT",
-    default=0.5,
+    default=SCORE_THRESHOLD,
     show_default=True,
     help="Probability threshold for considering projections as orthologous",
 )
-def main(
-    chain_file: click.Path,
-    orthology_scores: click.Path,
-    bed_file: click.Path,
-    output: Optional[click.File],
-    fragmented_only: Optional[bool],
-    orthology_threshold: Optional[float],
-) -> None:
+@click.option(
+    "--diff_contigs_only",
+    is_flag=True,
+    default=False,
+    show_default=True,
+    help=(
+        "If set, stitching fragments located on the same query contig "
+        "(scaffold, chromosome, etc.) is deprecated"
+    ),
+)
+@click.option(
+    "--log_name",
+    "-ln",
+    type=str,
+    metavar="STR",
+    default=None,
+    show_default=True,
+    help="Logger name to use; relevant only upon main class import",
+)
+@click.option(
+    "--verbose", "-v", is_flag=True, default=False, help="Control logging verbosity"
+)
+@click.option(
+    "--debug",
+    is_flag=True,
+    default=False,
+    show_default=True,
+    help="""Increase logging verbosity by logging debugging messages. 
+Automatically enables \"--verbose\" flag""",
+)
+class FragmentStitcher(CommandLineManager):
     """ """
-    tr2chains: Dict[str, List[int]] = stitch_scaffolds(
-        chain_file,
-        orthology_scores,
-        bed_file,
-        orthology_threshold=orthology_threshold,
-        fragments_only=fragmented_only,
+
+    __slots__ = (
+        "bed_file",
+        "chain_coordinates",
+        "chain_file",
+        "diff_contigs_only",
+        "fragmented_only",
+        "orth_chains",
+        "orth_threshold",
+        "output",
+        "score_file",
+        "tr2chains2score",
+        "tr2exons",
+        "tr2fragments",
     )
-    output.write(Headers.FRAGM_PROJ_HEADER)
-    for tr, chains in tr2chains.items():
-        chain_str: str = ",".join(map(str, sorted(map(int, chains))))
-        output.write(f"{tr}\t{chain_str}\n")
+
+    def __init__(
+        self,
+        chain_file: str | PathLike,
+        orthology_scores: TextIO,
+        bed_file: TextIO,
+        output: TextIO,
+        fragmented_only: bool,
+        orthology_threshold: float,
+        diff_contigs_only: bool,
+        log_name: str | None,
+        verbose: bool,
+        debug: bool,
+    ) -> None:
+        self.v: bool = verbose
+        self.debug: bool = debug
+        self.set_logging(name=log_name, toga_module="stitch_fragments")
+        self.chain_file: str | PathLike = chain_file
+        self.score_file: TextIO = orthology_scores
+        self.bed_file: TextIO = bed_file
+        self.output: TextIO = output
+        self.orth_threshold = orthology_threshold
+        self.fragmented_only: bool = fragmented_only
+        self.diff_contigs_only: bool = diff_contigs_only
+        ## all orthologous chain storage
+        self.orth_chains: set[str] = set()
+        ## chain coordinates
+        self.chain_coordinates: dict[str, tuple[str, int, int]] = {}
+        ## transcript-to-chain mapping
+        self.tr2exons: dict[str, list[tuple[int, ...]]] = {}
+        ## input transcript:chains mapping: orthologous chain lists
+        self.tr2chains2score: dict[str, dict[str, float]] = defaultdict(dict)
+        ## output transcript:chains mapping:
+        self.tr2fragments: dict[str, list[str]] = {}
+        self.output: TextIO = output
+
+        self.run()
+
+    def run(self) -> None:
+        """Main method"""
+        self.read_scores()
+        self.read_bed()
+        self.read_chain_file()
+        self.stitch_fragments()
+
+    def read_scores(self) -> None:
+        for i, data in enumerate(read_tab(self.score_file), start=1):
+            if len(data) < 3:
+                self._die(
+                    "Improper score file formatting at line %i: expected at least three fields, got %i"
+                    % (i, len(data))
+                )
+            if data[0] == TRANSCRIPT:
+                continue
+            tr, chain, score = data
+            try:
+                score: float = float(score)
+            except ValueError:
+                self._die(
+                    "Improper score file formatting at line %i: orthology score %s is not a valid decimal"
+                    % (i, score)
+                )
+            if score < self.orth_threshold:
+                continue
+            self.tr2chains2score[tr][chain] = score
+            self.orth_chains.add(chain)
+
+    def read_chain_file(self) -> None:
+        ## TODO: A good target for Rust/Maturin implementation
+        ## the following values are required: chromosome, start, end, strand
+        for i, data in enumerate(read_tab(self.chain_file, sep=" "), start=1):
+            if data[0] != CHAIN:
+                continue
+            ## the fields needed are: start and end in **reference**
+            ## and chromosome in **query**
+            if len(data) != 13:
+                self._die(
+                    (
+                        "Wrong chain header formatting in chain file %s at line %i; "
+                        "expected 13 fields, got %i"
+                    )
+                    % (self.chain_file, i, len(data))
+                )
+            chain_id: str = data[12]
+            ## do not bother with chains that are not orthologous to any known ref locus
+            if chain_id not in self.orth_chains:
+                continue
+            if data[4] not in ("+", "-"):
+                self._die(
+                    (
+                        "Wrong chain header formatting in chain file %s at line %i; "
+                        "expected either '+' or '-' for strand symbol, got %s"
+                    )
+                    % (self.chain_file, i, data[4])
+                )
+            strand: bool = data[4] == "+"
+            if strand: 
+                try:
+                    ref_start: int = int(data[5])
+                    ref_end: int = int(data[6])
+                except ValueError:
+                    self._die(
+                        (
+                            "Wrong chain header formatting in chain file %s at line %i; "
+                            "reference coordinates are not numeric values"
+                        )
+                        % (self.chain_file, i)
+                    )
+            else:
+                try:
+                    ref_length: int = int(data[3])
+                    ref_start: int = int(ref_length) - int(data[6])
+                    ref_end: int = int(ref_length) - int(data[5])
+                except ValueError:
+                    self._die(
+                        (
+                            "Wrong chain header formatting in chain file %s at line %i; "
+                            "reference coordinates are not numeric values"
+                        )
+                        % (self.chain_file, i)
+                    )
+            ## then, get the **query** chromosome
+            query_chrom: str = data[7]
+            ## record the retrieved data in self.chain_coordinates
+            self.chain_coordinates[chain_id] = (query_chrom, ref_start, ref_end)
+
+    def read_bed(self) -> dict[str, list[tuple[int, ...]]]:
+        for i, data in enumerate(read_tab(self.bed_file), start=1):
+            start: int = int(data[1])
+            name = data[3]
+            if name not in self.tr2chains2score:
+                continue
+            cds_start: int = int(data[6])
+            cds_end: int = int(data[7])
+            strand: bool = data[5] == "+"
+            sizes = [int(x) for x in data[10].split(",") if x != ""]
+            starts = [int(x) for x in data[11].split(",") if x != ""]
+            exon_num: int = len(sizes)
+            exon_coords: list[tuple[int, ...]] = []
+            for i in range(exon_num):
+                exon_start: int = start + starts[i]
+                if exon_start >= cds_end:
+                    break
+                exon_end: int = exon_start + sizes[i]
+                if exon_end <= cds_start:
+                    continue
+                exon_start = max(exon_start, cds_start)
+                exon_end = min(exon_end, cds_end)
+                num: int = i + 1 if strand else exon_num - i
+                exon_coords.append((num, exon_start, exon_end))
+            self.tr2exons[name] = exon_coords
+
+    def stitch_fragments(self) -> None:
+        """
+        Main fragment stitching method:
+        For each transcript, assess exon-to-chain intersection for all coding exons, construct
+        an ordered chain graph and sort it
+        """
+        header_written: bool = False
+        for tr, chains2scores in self.tr2chains2score.items():
+            exons: list[tuple[int, int]] | None = self.tr2exons.get(tr)
+            if exons is None:
+                self._die("No exon records found for reference transcript %s" % tr)
+            chain2exons: dict[str, tuple[int, ...]] = self._exon_cov_by_chain(
+                exons, chains2scores
+            )
+            if len(chain2exons) <= 1:
+                continue
+            ## if any chain covers the entirety of transcript,
+            ## there is no need to assemble fragmented copies
+            # if any(all(y) for x, y in chain2exons.items()):
+            if any(all(x in y for x in range(1, len(exons) + 1)) for y in chain2exons.values()):
+                continue
+            ## next, check exon-to-chain intersection for all exon ("exon coverage")
+            avg_exon_cov: float = self._get_exon_coverage(chain2exons, len(exons))
+            # print(f"AFTER: {tr=}, {chains2scores=}, {avg_exon_cov=}")
+            ## do not stitch fragments with high average exon-to-chain intersection rate
+            if avg_exon_cov > EXON_COV_THRESHOLD:
+                continue
+            ## otherwise, proceed with chain graph construction
+            chain_graph: Graph = self._build_graph(chains2scores)
+            ## add dummy source and sink nodes
+            chain_graph.add_source_sink_graph()
+            ## perform topological sort
+            sorted_vertices: list[int] = chain_graph.topological_sort()
+            ## find the shortest path in the graph;
+            ## this be the fragment projection configuration
+            _, shortest_path = chain_graph.find_shortest_path(sorted_vertices, self.diff_contigs_only)
+            # if tr == "XM_011532850.3#RGPD1":
+            #     print(f"{tr=}, {chain2exons=}, {avg_exon_cov=}, {sorted_vertices=}, {shortest_path=}")
+            #     for chain in chain2exons:
+            #         print(f"{chain=}, {self.chain_coordinates[chain]=}")
+            ## remove SINK from the path
+            # print(f"{shortest_path=}")
+            shortest_path = shortest_path[1:]
+            ## do not report single-chain transcripts
+            if self.fragmented_only and len(shortest_path) < 2:
+                continue
+            self.tr2fragments[tr] = shortest_path
+            del chain_graph
+            if not header_written:
+                self.output.write(Headers.FRAGM_PROJ_HEADER)
+                header_written = True
+            chain_str: str = ",".join(map(str, sorted(map(int, shortest_path))))
+            self.output.write(f"{tr}\t{chain_str}\n")
+
+    def _exon_cov_by_chain(
+        self, exons: list[tuple[int, ...]], chains2scores: list[str]
+    ) -> dict[str, tuple[int, ...]]:
+        """ """
+        chains: list[str] = sorted(
+            chains2scores.keys(), key=lambda x: self.chain_coordinates[x][1]
+        )
+        output: dict[str, tuple[int, ...]] = {}
+        # curr_exon: int = 0
+        for chain in chains:
+            covered_exons: list[str] = []
+            start: int = self.chain_coordinates[chain][1]
+            end: int = self.chain_coordinates[chain][2]
+            for exon, exon_start, exon_end in exons:
+                if intersection(start, end, exon_start, exon_end) > 0:
+                    # if exon_start >= start and exon_end <= end:
+                    covered_exons.append(exon)
+            output[chain] = tuple(covered_exons)
+        return output
+
+    def _get_exon_coverage(
+        self, chain2exons: dict[str, tuple[int, ...]], exon_num: int
+    ) -> float:
+        """
+        Calculates the average number of exon occurrences within chain boundaries
+
+        Args:
+            chain2exons: {chain: {exon_num: bool}} dictionary of exon occurrence within each chain
+            exon_num: number of exons in the focal transcript
+
+        Returns:
+            float average number of exon occurrences
+        """
+        exon_cov: int = sum([len(x) for x in chain2exons.values()])
+        average_cov = exon_cov / exon_num
+        return average_cov
+
+    def _build_graph(self, chains2scores: dict[str, float]) -> Graph:
+        """
+        Constructs a Graph object with chains overlapping the transcript as vertices
+
+        Args:
+            chains2scores: {chain_id: orthology_score} dictionary
+
+        Returns:
+            A Graph object for the focal transcript
+        """
+        chain_graph: Graph = Graph()
+        # add all vertices to the chain graph
+        for chain_id, score in chains2scores.items():
+            ## safeguard check for coordinate presence in the collection
+            if chain_id not in self.chain_coordinates:
+                self._die("Chain %s has no recorded coordinates" % chain_id)
+            chrom, start, end = self.chain_coordinates.get(chain_id)
+            v: Vertex = Vertex(chain_id, chrom, start, end, -1 * score)
+            chain_graph.add_vertex(v)
+
+        # add edges to the chain graph
+        for i in chain_graph.vertices:
+            for j in chain_graph.vertices:
+                if i == j:
+                    ## ignore self-edges
+                    continue
+                i_vertex: Vertex = chain_graph.vertices[i]
+                j_vertex: Vertex = chain_graph.vertices[j]
+                ## do not connect fragments located on the same query chromosome
+                if i_vertex.chrom == j_vertex.chrom and self.diff_contigs_only:
+                    continue
+                ## allow some overlap between chains
+                if (
+                    intersection(
+                        i_vertex.start, i_vertex.end, j_vertex.start, j_vertex.end
+                    )
+                    > MAX_OVERLAP
+                ):
+                    continue
+                chain_graph.add_edge(i_vertex.name, j_vertex.name)
+        return chain_graph
 
 
 if __name__ == "__main__":
-    t0 = dt.now()
-    # setup_logger(args.log_file)
-    main()
-    elapsed = dt.now() - t0
-    # to_log(f"# Elapsed: {elapsed}")
+    FragmentStitcher()

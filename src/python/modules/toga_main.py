@@ -70,12 +70,12 @@ class TogaMain(CommandLineManager):
         query_2bit: os.PathLike,
         chain_file: os.PathLike,
         ref_annotation: os.PathLike,
-        isoform_file: Optional[os.PathLike],
-        no_isoform_file: Optional[bool],
+        isoform_file: os.PathLike | None,
+        no_isoform_file: bool,
         u12_file: Optional[os.PathLike],
-        no_u12_file: Optional[bool],
+        no_u12_file: bool,
         spliceai_dir: Optional[os.PathLike],
-        no_spliceai: Optional[bool],
+        no_spliceai: bool,
         input_directory: Optional[os.PathLike],
         ref_name: Optional[str],
         query_name: Optional[str],
@@ -84,22 +84,23 @@ class TogaMain(CommandLineManager):
         selected_feature_batches: Optional[Union[str, None]],
         selected_preprocessing_batches: Optional[Union[str, None]],
         selected_alignment_batches: Optional[Union[str, None]],
-        no_utr_annotation: Optional[bool],
+        no_utr_annotation: bool,
         min_chain_score: Optional[int],
         min_orthologous_chain_score: Optional[int],
         feature_jobs: Optional[int],
         orthology_threshold: Optional[float],
         single_exon_model: Optional[os.PathLike],
         multi_exon_model: Optional[os.PathLike],
-        use_long_distance_model: Optional[bool],
+        use_long_distance_model: bool,
         long_distance_model: Optional[os.PathLike],
-        disable_fragment_assembly: Optional[bool],
-        orthologs_only: Optional[bool],
-        one2ones_only: Optional[bool],
-        annotate_paralogs: Optional[bool],
-        paralogs_over_spanning: Optional[bool],
-        enable_spanning_chains: Optional[bool],
-        annotate_processed_pseudogenes: Optional[bool],
+        orthologs_only: bool,
+        one2ones_only: bool,
+        annotate_paralogs: bool,
+        paralogs_over_spanning: bool,
+        enable_spanning_chains: bool,
+        annotate_processed_pseudogenes: bool,
+        disable_fragment_assembly: bool,
+        enable_same_contigs: bool,
         preprocessing_jobs: Optional[int],
         max_chains_per_transcript: Optional[int],
         max_search_space_size: Optional[int],
@@ -110,7 +111,7 @@ class TogaMain(CommandLineManager):
         cesar_binary: Optional[Union[str, None]],
         memory_bins: Optional[str],
         job_nums_per_bin: Optional[str],
-        allow_heavy_jobs: Optional[bool],
+        allow_heavy_jobs: bool,
         cesar_memory_limit: Optional[int],
         cesar_profile_dir: Optional[os.PathLike],
         cesar_canon_u2_acceptor: Optional[os.PathLike],
@@ -123,32 +124,32 @@ class TogaMain(CommandLineManager):
         cesar_non_canon_u12_donor: Optional[os.PathLike],
         cesar_first_acceptor: Optional[os.PathLike],
         cesar_last_donor: Optional[os.PathLike],
-        joint_splice_site_treatment: Optional[bool],
+        joint_splice_site_treatment: bool,
         spliceai_correction_mode: Optional[int],
         min_splice_prob: Optional[float],
         splice_prob_margin: Optional[float],
-        intron_gain_check: Optional[bool],
+        intron_gain_check: bool,
         intron_gain_threshold: Optional[float],
-        min_intron_prob_trusted: Optional[bool],
-        min_intron_prob_supported: Optional[bool],
-        min_intron_prob_unsupported: Optional[bool],
+        min_intron_prob_trusted: bool,
+        min_intron_prob_supported: bool,
+        min_intron_prob_unsupported: bool,
         max_intron_number: Optional[int],
         matrix: Optional[os.PathLike],
-        mask_n_terminal_mutations: Optional[bool],
-        disable_missing_stop_search: Optional[bool],
+        mask_n_terminal_mutations: bool,
+        disable_missing_stop_search: bool,
         accepted_loss_symbols: Optional[str],
-        skip_gene_trees: Optional[bool],
+        skip_gene_trees: bool,
         max_clique_size: Optional[int],
-        use_raxml: Optional[bool],
+        use_raxml: bool,
         orthology_jobs: Optional[int],
         prank_binary: Optional[Union[os.PathLike, None]],
         tree_binary: Optional[Union[os.PathLike, None]],
         tree_cpus: Optional[int],
         utr_abs_threshold: Optional[int],
         utr_rel_threshold: Optional[float],
-        no_utr_boundary_extrapolation: Optional[bool],
-        no_adjacent_utr_extra: Optional[bool],
-        fixed_adjacent_utr_extra: Optional[bool],
+        no_utr_boundary_extrapolation: bool,
+        no_adjacent_utr_extra: bool,
+        fixed_adjacent_utr_extra: bool,
         link_file: Optional[Union[os.PathLike, None]],
         ucsc_prefix: Optional[str],
         parallel_strategy: Optional[str],
@@ -157,21 +158,21 @@ class TogaMain(CommandLineManager):
         nextflow_config_dir: Optional[Union[os.PathLike, None]],
         max_parallel_time: Optional[int],
         cluster_queue_name: Optional[str],
-        keep_nextflow_log: Optional[bool],
-        ignore_crashed_parallel_batches: Optional[bool],
+        keep_nextflow_log: bool,
+        ignore_crashed_parallel_batches: bool,
         container_image: Optional[os.PathLike],
         container_executor: Optional[str],
         bindings: Optional[str],
-        legacy_chain_feature_extraction: Optional[bool],
-        toga1_compatible: Optional[bool],
-        toga1_plus_corrected_cesar: Optional[bool],
-        account_for_alternative_frame: Optional[bool],
+        legacy_chain_feature_extraction: bool,
+        toga1_compatible: bool,
+        toga1_plus_corrected_cesar: bool,
+        account_for_alternative_frame: bool,
         output: Optional[os.PathLike],
         project_name: Optional[str],
         project_arg_format: Optional[str],
-        keep_temporary_files: Optional[bool],
-        verbose: Optional[bool],
-        debug: Optional[bool],
+        keep_temporary_files: bool,
+        verbose: bool,
+        debug: bool,
         email: Optional[Union[str, None]],
         mailx_binary: Optional[Union[str, None]],
         fatotwobit_binary: Optional[Union[os.PathLike, None]],
@@ -180,7 +181,7 @@ class TogaMain(CommandLineManager):
         bedtobigbed_binary: Optional[Union[os.PathLike, None]],
         ixixx_binary: Optional[Union[os.PathLike, None]],
         cmd: str,
-        # version: Optional[bool],
+        # version: bool,
     ) -> None:
         self.v: bool = verbose | debug
         self.debug: bool = debug
@@ -235,6 +236,7 @@ class TogaMain(CommandLineManager):
         self.ld_model: str = long_distance_model
 
         self.disable_fragment_assembly: bool = disable_fragment_assembly
+        self.enable_same_contigs: bool = enable_same_contigs
         self.annotate_ppgenes: bool = annotate_processed_pseudogenes
         self.orthologs_only: bool = orthologs_only
         self.one2ones_only: bool = one2ones_only
@@ -2205,7 +2207,7 @@ class TogaMain(CommandLineManager):
         """
         if self.disable_fragment_assembly:
             return
-        from .stitch_fragments import main
+        from .stitch_fragments import FragmentStitcher
 
         args: List[str] = [
             self.chain_file_copy,
@@ -2214,10 +2216,15 @@ class TogaMain(CommandLineManager):
             "-o",
             self.fragmented_projection_list,
             "--orthology_threshold",
-            f"{self.orthology_threshold}",
+            str(self.orthology_threshold),
             "--fragmented_only",
+            "-v"
         ]
-        main(args, standalone_mode=False)
+        if not self.enable_same_contigs:
+            args.append("--diff_contigs_only")
+        if self.debug:
+            args.append("--debug")
+        FragmentStitcher(args, standalone_mode=False)
 
     def schedule_preprocessing_jobs(self) -> None:
         """

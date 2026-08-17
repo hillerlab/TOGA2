@@ -94,6 +94,10 @@ gene_select_options: PrettyGroup = PrettyGroup(
     "Query gene selection",
     help="Controls orthology/completeness classes of query projections to annotate",
 )
+fragm_options: PrettyGroup = PrettyGroup(
+    "Fragmented projection assembly",
+    help="Controls fragmented projections assembly process"
+)
 prepr_options: PrettyGroup = PrettyGroup(
     "Preprocessing",
     help="Data preprocessing for CESAR alignment",
@@ -485,15 +489,6 @@ relevant at molecular distances >=1sps""",
 reference-query species pairs""",
 )
 @gene_select_options.option(
-    "--disable_fragment_assembly",
-    "-no_f",
-    is_flag=True,
-    default=False,
-    show_default=True,
-    help="""If set, does not attempt to recover fragmented projections 
-from individual chains""",
-)
-@gene_select_options.option(
     "--orthologs_only",
     "-o_only",
     is_flag=True,
@@ -547,6 +542,24 @@ spanning chains are used only to discriminate between Lost and Missing projectio
     show_default=True,
     help="""If set, processed pseudogene projections are considered for CESAR alignment; 
 otherwise, a separate BED9 track "processed_pseudogenes.bed" is added to output directory""",
+)
+@fragm_options.option(
+    "--disable_fragment_assembly",
+    "-no_f",
+    is_flag=True,
+    default=False,
+    show_default=True,
+    help="""If set, does not attempt to recover fragmented projections 
+from individual chains""",
+)
+@fragm_options.option(
+    "--enable_same_contigs",
+    is_flag=True,
+    default=False,
+    show_default=True,
+    help="""If set, fragments residing on the same contig (scaffold, chromosome, etc.) 
+are allowed for use in the same fragmented projection
+"""
 )
 @prepr_options.option(
     "--preprocessing_jobs",
