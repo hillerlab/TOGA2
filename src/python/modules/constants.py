@@ -377,7 +377,7 @@ workflow {{
         println("Usage: nextflow execute_joblist.nf  --joblist [joblist file] -c [config file]")
         System.exit(2)
     }}
-    lines = Channel.fromPath(params.joblist).splitText()
+    def lines = Channel.fromPath(params.joblist).splitText()
     execute_jobs(lines)
 }}"""
 
