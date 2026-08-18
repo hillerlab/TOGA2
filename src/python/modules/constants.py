@@ -120,7 +120,7 @@ class Constants:
         datefmt="%Y-%m-%d %H:%M:%S",
     )
 
-    RESUME_OPTIONS: List[str] = [
+    RESUME_OPTIONS: tuple[str, ...] = (
         "all",
         "setup",
         "feature_extraction",
@@ -135,7 +135,7 @@ class Constants:
         "summarize_trees",
         "finalize",
         "ucsc_report",
-    ]
+    )
 
     RESUME_ORDER: Dict[str, int] = {x: i for i, x in enumerate(RESUME_OPTIONS)}
     CESAR_AGGREGATION_RANK: int = RESUME_ORDER["aggregate_cesar_res"]
