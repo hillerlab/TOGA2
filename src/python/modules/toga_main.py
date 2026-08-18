@@ -169,6 +169,7 @@ class TogaMain(CommandLineManager):
         output: Optional[os.PathLike],
         project_name: Optional[str],
         project_arg_format: Optional[str],
+        local_tmp: bool,
         keep_temporary_files: Optional[bool],
         verbose: Optional[bool],
         debug: Optional[bool],
@@ -332,6 +333,7 @@ class TogaMain(CommandLineManager):
         )  # self.nextflow_config_dir is not None ## TODO: Add config dir content check
         self.max_parallel_time: int = max_parallel_time
         self.project_arg_format: str = project_arg_format
+        self.local_tmp: bool = local_tmp
         self.keep_nextflow_log: bool = keep_nextflow_log
         self.cluster_queue_name: str = cluster_queue_name
         self.container_image: Union[os.PathLike, None] = self._abspath(container_image)
@@ -1505,8 +1507,10 @@ class TogaMain(CommandLineManager):
 
         ## create the first-level directories
         ## (for results, metadata, and temporary files)
-        self.create_tmp_dir()
-        self._mkdir(self.tmp)
+        if self.local_tmp:
+            self._mkdir(self.tmp)
+        else:
+            self.create_tmp_dir()
         self._mkdir(self.meta)
         # self._mkdir(self.res)
         ## create subdirectories for temporary files' folder
