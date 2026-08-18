@@ -138,23 +138,23 @@ class Exon2BlockMapper:
     """
 
     __slots__ = [
+        "blocks",  #'e2b', 'fe2b',
         "chainid",
+        "dangling",
+        "e2c",
+        "gap_located",
+        "missing",
+        "out_of_chain",
         "prob",
-        "tstart",
-        "tstop",
+        "qchrom",
         "qstart",
         "qstop",
-        "tchrom",
-        "qchrom",
-        "tstrand",
         "qstrand",
-        "blocks",  #'e2b', 'fe2b',
-        "e2c",
-        "out_of_chain",
-        "missing",
-        "gap_located",
-        "dangling",
         "spanning_chain",  # , 'aa_qual'
+        "tchrom",
+        "tstart",
+        "tstop",
+        "tstrand",
     ]
     chainid: str
     # prob: float
