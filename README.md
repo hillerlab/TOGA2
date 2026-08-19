@@ -41,6 +41,7 @@
 ### v2.0.9
 * `run` mode:
     * Paralog annotation is now possible even for transcripts with existing orthologous chains with `--annotate_paralogs` flag. Paralogs annotated this way are retained only if they have loss status of at least *UL*, and no more than 5 paralogs with predicted orthologs per query locus are kept in the annotation.
+* `tmp/` directory is now created at user's `$TMPDIR` addressed to by a local symlink. The original behavior can be restored by setting `--local_tmp` flag.
 * `prepare-input` mode:
     * Annotation and isoform file can be now generated from a GFF3/GTF file;
     * Minimal intron length and nonsense-mediated decay (NMD) filters for reference transcripts;

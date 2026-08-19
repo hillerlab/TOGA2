@@ -122,6 +122,7 @@ DEFAULT_ARGS: Dict[str, Union[str, int, float, bool, None]] = {
     "output": None,
     "project_name": "TOGA2",
     "project_arg_format": "yaml",
+    "local_tmp": False,
     "keep_temporary_files": False,
     "verbose": True,
     "debug": False,

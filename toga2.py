@@ -1244,6 +1244,13 @@ log and metadata files""",
     help="Project argument file format",
 )
 @out_options.option(
+    "--local_tmp",
+    is_flag=True,
+    default=False,
+    show_default=True,
+    help="If set, creates a tmp directory locally instead of using the user's $TMPDIR"
+)
+@out_options.option(
     "--keep_temporary_files",
     "-k",
     is_flag=True,
