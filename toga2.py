@@ -2374,7 +2374,7 @@ if aligner program is set to MUSCLE""",
 )
 @out_options.option(
     "--tmp_dir",
-    type=click.Path(exists=True),
+    type=click.Path(exists=False),
     metavar="TMP_DIR",
     default=os.getcwd(),
     show_default=False,
