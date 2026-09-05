@@ -1,3 +1,7 @@
+## TOGA2 supports bash only; make's default recipe shell is /bin/sh, which is dash on
+## Debian/Ubuntu. Set it explicitly so recipes and check_shell agree.
+SHELL := /bin/bash
+
 ARCH=$(shell uname -m)
 CHECK_DEPS=check_dependencies.py
 DELIM="=============================="
@@ -53,10 +57,11 @@ check_python:
 	python3 ${CHECK_DEPS} python --installation_mode
 
 check_shell:
-	if [ $(echo $0) != "-bash" ]; then \
-		echo "ERROR: TOGA2 currently only supports bash as operating shell. Please change you default shell or create a separate environment with bash as default"; \
+	@if [ -n "$${BASH_VERSION:-}" ]; then \
+		echo "bash detected ($$BASH_VERSION); shell type check successfully passed"; \
 	else \
-		echo "bash has been found to be a default current shell; shell type check successfully passed" ; \
+		echo "ERROR: TOGA2 currently only supports bash as operating shell. Please change your default shell or create a separate environment with bash as default" >&2; \
+		exit 1; \
 	fi
 
 check_third_party:
