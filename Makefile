@@ -14,15 +14,16 @@ build: chmod install check build_c build_cesar build_cython build_rust train_mod
 
 install: install_binaries install_python install_third_party install_postoga
 
+TOGA_CFLAGS = -Wall -Wextra -O2 -g -std=c99
+ifeq ($(ARCH),arm64)
+TOGA_CFLAGS += -arch arm64
+endif
+
 build_c:
-	if [ ARCH = "arm64" ]; then \
-		CFLAGS="-Wall -Wextra -O2 -g -std=c99 -arch arm64"; \
-	else \
-		CFLAGS="-Wall -Wextra -O2 -g -std=c99"; \
-	fi; \
-	mkdir -p bin && gcc $$CFLAGS -o bin/chain_filter_by_id src/c/chain_filter_by_id.c
-	gcc $$CFLAGS -fPIC -shared -o src/python/modules/chain_coords_converter_slib.so src/c/chain_coords_converter_slib.c
-	gcc $$CFLAGS -fPIC -shared -o src/python/modules/chain_bst_lib.so src/c/chain_bst_lib.c
+	mkdir -p bin
+	gcc $(TOGA_CFLAGS) -o bin/chain_filter_by_id src/c/chain_filter_by_id.c
+	gcc $(TOGA_CFLAGS) -fPIC -shared -o src/python/modules/chain_coords_converter_slib.so src/c/chain_coords_converter_slib.c
+	gcc $(TOGA_CFLAGS) -fPIC -shared -o src/python/modules/chain_bst_lib.so src/c/chain_bst_lib.c
 	echo ${DELIM}
 
 build_cesar:
