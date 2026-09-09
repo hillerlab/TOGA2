@@ -10,7 +10,6 @@ from _io import TextIOWrapper
 from collections import defaultdict
 from dataclasses import dataclass
 from datetime import datetime
-from sys import stderr
 from typing import Any, Dict, Iterable, List, Set, TextIO, Tuple, Union
 
 import click
@@ -1992,7 +1991,6 @@ def prepare_exons(
         raw_seq = raw_seq.upper()
         is_first: bool = num == 1
         is_last: bool = num == max_exon
-        # stderr.write(f'>{num}\n{raw_seq}\n')
         ## process splice sites if any were captured during sequence extraction
         acc_flank, donor_flank = exon_flanks[num]
         acc_: str = raw_seq[:acc_flank]
@@ -2440,12 +2438,9 @@ def intersect_exons_to_blocks(  ## TODO: clearly must be moved to Exon2BlockMapp
     ex_num2blocks: Dict[int, List[int]] = defaultdict(list)
     # fl_ex_num2blocks: Dict[int, List[int]] = defaultdict(list)
     # aa_ex_num2blocks: Dict[int, List[int]] = defaultdict(list)
-    init0 = datetime.now()
     sorted_block_keys: List[str] = sorted(
         blocks.keys(), key=lambda x: (blocks[x][0], blocks[x][1])
     )
-    block_sort_point = datetime.now()
-    stderr.write(f"Block sorting time: {str(block_sort_point - init0)}\n")
     tstart: int = blocks[sorted_block_keys[0]][0]
     tstop: int = blocks[sorted_block_keys[-1]][1]
     qstart: int = min(x[2] for x in blocks.values())
@@ -2454,7 +2449,6 @@ def intersect_exons_to_blocks(  ## TODO: clearly must be moved to Exon2BlockMapp
     sorted_exon_keys: List[int] = sorted(exons.keys(), key=lambda x: exons[x].start)
 
     for e_num in sorted_exon_keys:
-        init = datetime.now()
         exon: Exon = exons[e_num]
         extra_flank: int = int(exon.length() * extra_flank_modifier)
         min_coord, max_coord = 0, 0
@@ -2463,8 +2457,6 @@ def intersect_exons_to_blocks(  ## TODO: clearly must be moved to Exon2BlockMapp
         ):
             this_block: List[str] = blocks[b_num]
             if this_block[0] > exon.stop:
-                inter_point = datetime.now()
-                stderr.write(f"Intersection time: {str(inter_point - init)}\n")
                 break
             if not (this_block[1] - this_block[0]):
                 continue
@@ -2475,14 +2467,11 @@ def intersect_exons_to_blocks(  ## TODO: clearly must be moved to Exon2BlockMapp
                 continue
             curr_block = b_pointer
             ex_num2blocks[e_num].append(b_num)
-        loop_end_point = datetime.now()
-        stderr.write(f"Regular loop end time: {str(loop_end_point - init)}\n")
 
         ## infer the exons coordinates from the chain blocks
 
         ## case 0: if there are no blocks of non-zero length corresponding
         ## to the exons, mark it as missing and proceed further
-        init2 = datetime.now()
         if not ex_num2blocks[e_num]:
             click.echo(
                 f"Exon {exon.num} is missing from the chain"
@@ -2531,8 +2520,6 @@ def intersect_exons_to_blocks(  ## TODO: clearly must be moved to Exon2BlockMapp
                 max_coord -= trim_down if codirected else trim_up
         ## case 2: there are more than one block corresponding to the exon
         else:
-            # print(f'FLAG {blocks=}')
-            # print(f'FLAG {up_block_name=}, {down_block_name=}')
             new_up_block_name, next_up_block_name = (
                 up_block_name.split("_")
                 if "_" in up_block_name
@@ -2658,17 +2645,11 @@ def intersect_exons_to_blocks(  ## TODO: clearly must be moved to Exon2BlockMapp
         max_coord = nn(min(max_coord, q_chrom_size))
         exons2coordinates[e_num] = (min_coord, max_coord)
         # dangling_ends[e_num] = cov_status
-        exon_proc_point = datetime.now()
-        stderr.write(
-            f"Exon processing after intersection time: {str(exon_proc_point - init2)}\n"
-        )
-        stderr.write(f"Full exon processing time: {str(exon_proc_point - init)}\n")
 
     spanning_chain: bool = all(e in missing or e in gap_located for e in exons)
     # print(f'{out_of_chain=}')
     # print(f'GAP LOCATED: {gap_located=}')
 
-    init3 = datetime.now()
     mapper: Exon2BlockMapper = Exon2BlockMapper(
         chainid,
         # chain_prob,
@@ -2692,8 +2673,6 @@ def intersect_exons_to_blocks(  ## TODO: clearly must be moved to Exon2BlockMapp
         spanning_chain,
         # aa_sat
     )
-    instance_prep_time = datetime.now()
-    stderr.write(f"Instance preparation time: {str(instance_prep_time - init3)}\n")
 
     return mapper  # , curr_block
 
