@@ -1,3 +1,11 @@
+## v2.0.10
+* `integrate` mode:
+    * Fixed gene disjointing problem leading to paralogs and lost orthologous overlapping functional orthologs form independent gene units;
+    * Iterative novelty filter for paralogous and lost projections to minimize the number of added projections;
+* Minor changes:
+    * `run`:
+        * `cesar_wrapper_constants.py`: increasing MAX_INTRON_GROUP_NUM to 1000 to account for denser SpliceAI prediction layout.
+
 ## v2.0.9
 * `run` mode:
     * Paralog annotation is now possible even for transcripts with existing orthologous chains with `--annotate_paralogs` flag. Paralogs annotated this way are retained only if they have loss status of at least *UL*, and no more than 5 paralogs with predicted orthologs per query locus are kept in the annotation.
