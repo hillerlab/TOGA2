@@ -1,4 +1,6 @@
 ## v2.0.10
+* `run` mode:
+    * Deprecated use of fragments on the same chromosome for fragmented projection assembly. The legacy behavior can be enable with the `--enable_same_contigs` flag. 
 * `integrate` mode:
     * Fixed gene disjointing problem leading to paralogs and lost orthologous overlapping functional orthologs form independent gene units;
     * Iterative novelty filter for paralogous and lost projections to minimize the number of added projections;

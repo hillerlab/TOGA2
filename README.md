@@ -38,25 +38,12 @@
 ---
 
 ## Changelog
-### v2.0.9
+### v2.0.10
 * `run` mode:
-    * Paralog annotation is now possible even for transcripts with existing orthologous chains with `--annotate_paralogs` flag. Paralogs annotated this way are retained only if they have loss status of at least *UL*, and no more than 5 paralogs with predicted orthologs per query locus are kept in the annotation.
-* `tmp/` directory is now created at user's `$TMPDIR` addressed to by a local symlink. The original behavior can be restored by setting `--local_tmp` flag.
-* `prepare-input` mode:
-    * Annotation and isoform file can be now generated from a GFF3/GTF file;
-    * Minimal intron length and nonsense-mediated decay (NMD) filters for reference transcripts;
-    * Minimal CDS intron length filter;
-    * Minimal internal (non-terminal) CDS exon length filter;
-    * Reference gene coordinates in BED format (`${ref}.toga.genes.bed`) now added to output;
+    * Deprecated use of fragments on the same chromosome for fragmented projection assembly. The legacy behavior can be enable with the `--enable_same_contigs` flag. 
 * `integrate` mode:
-    * Adding GTF format query annotation (`query_annotation.gtf.gz`) to output;
-    * Adding integration summary (`summary.txt`) to output;
-* **NEW MODE**: `orthogroups` enables orthogroup modelling and generates gene family files compatible with [CAFE5](https://github.com/hahnlab/CAFE5) input.
-* **NEW MODE**: `toga2agora` creates ordered lists of 1:1 orthologs across multuple runs compatible with the [AGORA](https://github.com/DyogenIBENS/Agora) tool for gene order and synteny analysis.
-* **NEW COMPANION PIPELINE**: `toga2kbpython` for estimating gene expression with `kb-python` and TOGA2 output (`v2.0.9d`; early access).
-* **NEW COMPANION SCRIPT**: `toga2stats` for assembly quality assessment based on the ancestral gene set.
-* Companion dataset:
-    * Adding input annotation for two turtle (*Emydura macquarii macquarii*, *Emys orbicularis*) and five percomoprh fish (*Gasterosteus aculeatus*, *Hippoglossus stenolepis*, *Melanotaenia boesemani*, *Nothobranchius furzeri*, *Synchiropus splendidus*) reference species.
+    * Fixed gene disjointing problem leading to paralogs and lost orthologous overlapping functional orthologs form independent gene units;
+    * Iterative novelty filter for paralogous and lost projections to minimize the number of added projections;
 
 For the full list of code changes, see [changelog.md](https://github.com/hillerlab/TOGA2/blob/main/assets/changelog/changelog.md) .
 
@@ -157,6 +144,7 @@ Provided the successful installation, you will see the TOGA2 execution log print
 >[!NOTE]
 > If you are running TOGA2 from Apptainer, you might have to provide a custom output directory with `--output/-o` option to bypass the read-only container configuration:
 ```
-TMPDIR=${tmp_dir} apptainer run --bind ${bound_dir1},${bound_dir2} ${container.sif} toga2.py test -o ${output_dir}
+apptainer run --bind ${bound_dir1},${bound_dir2} --env NXF_HOME="${TMPDIR}/.nextflow" ${container.sif} toga2.py test -o ${output_dir}
 ```
+>See `supply/containers/README.md` for more info.
 
