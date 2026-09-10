@@ -8,7 +8,12 @@ apptainer build <your_container_name> apptainer.def
 Note that the resulting container supports only local execution. If you want to use TOGA2 with a cluster job manager as Nextflow executor, proceed to the next section.
 Running the resulting container is comparably straightforward; all you need is to provide the necessary bindings for directories on the local machine:
 ```
-apptainer exec --bind <your bindings go here>  <your_container_name> toga2.py <your_settings>
+apptainer exec --bind <your bindings go here>  --env NXF_HOME="<your tmp dir on cluster>/.nextflow" <your_container_name> toga2.py <your_settings>
+```
+>[!NOTE]
+>Nextflow requires a directory ($NFX_HOME) to write temporary files to. Since the suggested container is read-only, the directory must be bound to a local directory on your machine. A good candidate us the user's $TMPDIR:
+```
+apptainer exec --bind ${TMPDIR}/<other bindings>  --env NXF_HOME="${TMPDIR}/.nextflow" <your_container_name> toga2.py <your_settings>
 ```
 
 ## Building container for cluster execution

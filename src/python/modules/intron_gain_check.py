@@ -336,7 +336,6 @@ def frameshift_in_cesar_data(ref: str, query: str) -> bool:
         ref, query = strip_intron_deletion_runs(ref, query)
     indels_in_ref: str = ref.replace(GAP_CODON, "").count("-")
     indels_in_query: str = query.replace(GAP_CODON, "").count("-")
-    # print(f'{indels_in_ref=}, {indels_in_query=}')
     return abs(indels_in_ref - indels_in_query) % 3 != 0
 
 
@@ -713,12 +712,6 @@ class IntronGainChecker:
                 # portion.query[prev_exon_start:prev_exon_end]
             )
         last_exon_length: int = len(total_seq)
-        # print(f'{intron=}, {total_seq=}')
-        # print(f'{intron=}, {merged_exons=}, {last_exon_length=}, {prev_intron_phase=}')
-        # print(f'{portion.reference[prev_exon_start:prev_exon_end]=}')
-        # print(f'{strip_noncoding(portion.reference[prev_exon_start:prev_exon_end])=}')
-        # print(f'{portion.query[prev_exon_start:prev_exon_end]=}')
-        # print(f'{strip_noncoding(portion.query[prev_exon_start:prev_exon_end])=}')
         return (last_exon_length - 3 + prev_intron_phase) % 3
 
     def _check_for_intron_gain(self, portion: RawCesarOutput, exon: int) -> Any:
@@ -754,7 +747,6 @@ class IntronGainChecker:
         if stop not in alt_donors:
             alt_donors[stop] = 0.0
         potential_exons: List[Tuple[int, int, float, float]] = []
-        # print(f'{alt_accs=}, {alt_donors=}')
         ## now, get all the plausible acceptor-donor pairs
         for acc, acc_prob in sorted(alt_accs.items()):
             if acc != start:
@@ -768,11 +760,8 @@ class IntronGainChecker:
                     slice(*self.rel_exon_coords[exon].tuple())
                 ].replace("-", "")
                 mod_seq: str = portion.query[acc:donor].replace("-", "")
-                # print(f'{portion.query[slice(*self.rel_exon_coords[exon].tuple())]=}, {mod_seq=}, {exon=}')
                 if orig_seq and not mod_seq:
                     continue
-                # if len(portion.query) >= 3 and len(mod_seq) < 3:
-                #     continue
                 new_group: Tuple[int, int, float, float] = (
                     acc,
                     donor,
@@ -780,7 +769,6 @@ class IntronGainChecker:
                     donor_prob,
                 )
                 potential_exons.append(new_group)
-        # print(f'{potential_exons=}')
 
         ## all exon groups should start with the original acceptor site;
         ## add respective candidates as primers to
@@ -891,6 +879,7 @@ class IntronGainChecker:
                     self._to_log(
                         f"SKIPPING: Gap- and mutation-independent intron at {group_donor}-{acc} (exon {exon}) has insufficient SpliceAI support"
                     )
+                    groups_to_remove.append(group)
                     continue
                 ## introduced introns cannot split inframe stop codons
                 if self._alternative_split_contains_stop(
@@ -899,11 +888,12 @@ class IntronGainChecker:
                     self._to_log(
                         f"SKIPPING: Split stop codon created by intron at {group_donor}-{acc} (exon {exon})"
                     )
+                    groups_to_remove.append(group)
                     continue
                 ## abide to the maximum allowed intron number
                 if group.len() == (self.max_intron_num - 1) and donor != stop:
                     self._to_log(
-                        "SKIPPING: Maximum intron number exceeded in the layout (exon {exon})"
+                        f"SKIPPING: Maximum intron number exceeded in the layout (exon {exon})"
                     )
                     groups_to_remove.append(group)
                     continue
@@ -927,18 +917,17 @@ class IntronGainChecker:
                     % 3
                 )
                 new_groups.append(modif_group)
-                if (
-                    len(potential_exon_groups) + len(new_groups) - len(groups_to_remove)
-                    > MAX_INTRON_GROUP_NUM
-                ):
-                    self._to_log(
-                        (
-                            "The current number of available groups exceeds the threshold value of %i; "
-                            "exiting without further reference-absent intron annotation"
-                        ), 
-                        "warning"
-                    )
-                    return
+            if (
+                len(potential_exon_groups) + len(new_groups) - len(groups_to_remove)
+            ) > MAX_INTRON_GROUP_NUM:
+                self._to_log(
+                    (
+                        "The current number of available groups exceeds the threshold value of %i; "
+                        "exiting without further reference-absent intron annotation"
+                    ) % MAX_INTRON_GROUP_NUM, 
+                    "warning"
+                )
+                return
             potential_exon_groups = [
                 x for x in potential_exon_groups if x not in groups_to_remove
             ]
@@ -983,10 +972,6 @@ class IntronGainChecker:
             coverage_score: float = (init_exon_len - intron_len_sum) / init_exon_len
             if coverage_score < self.min_intron_gain_score:  ## TODO: Placeholder!
                 continue
-            # print(f'{group=}')
-            # for _e in group.exon_tuples:
-            #     print(f'{portion.reference[slice(*_e[:2])]=}')
-            #     print(f'{portion.query[slice(*_e[:2])]=}')
             group2score[j] = (corr_frame, coverage_score, intron_num)
         if not group2score:
             return
@@ -1140,16 +1125,11 @@ class IntronGainChecker:
         ## get inframe stops within the intron boundaries;
         ## get the absolute value of the leading intron if it is deleted
         acc_phase: int = (3 - abs(self.intron2phase.get(exon - 1, 0))) % 3
-        # init_ref_seq: str = portion.reference[exon_start:exon_end]
-        # init_query_seq: str = portion.query[exon_start:exon_end]
         pre_intron_seq: str = portion.query[exon_start:start].replace("-", "")
-        # print(f'{pre_intron_seq=}')
         pre_intron_phase: int = (len(pre_intron_seq) - acc_phase) % 3
         split_nuc: str = pre_intron_seq[-pre_intron_phase:] if pre_intron_phase else ""
         intron_seq: str = split_nuc + portion.query[start:end].replace("-", "")
-        # print(f'{intron_seq=}')
         has_nonsense_mut: bool = any(x.upper() in STOPS for x in parts(intron_seq, 3))
-        # print(f'{has_frameshift=}, {has_nonsense_mut=}, {acc_phase=}, {pre_intron_phase=}')
         return bool(has_frameshift) or bool(has_nonsense_mut)
 
     def _candidate_intron_summary(

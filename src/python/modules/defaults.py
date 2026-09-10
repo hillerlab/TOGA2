@@ -50,6 +50,7 @@ DEFAULT_ARGS: Dict[str, Union[str, int, float, bool, None]] = {
     "use_long_distance_model": False,
     "long_distance_model": os.path.join(MODELS, "ld_model.dat"),
     "disable_fragment_assembly": False,
+    "enable_same_contigs": False,
     "orthologs_only": False,
     "one2ones_only": False,
     "paralogs_over_spanning": False,

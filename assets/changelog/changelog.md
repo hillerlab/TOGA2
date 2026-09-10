@@ -1,7 +1,17 @@
+## v2.0.10
+* `run` mode:
+    * Deprecated use of fragments on the same chromosome for fragmented projection assembly. The legacy behavior can be enable with the `--enable_same_contigs` flag. 
+* `integrate` mode:
+    * Fixed gene disjointing problem leading to paralogs and lost orthologous overlapping functional orthologs form independent gene units;
+    * Iterative novelty filter for paralogous and lost projections to minimize the number of added projections;
+* Minor changes:
+    * `run`:
+        * `cesar_wrapper_constants.py`: increasing MAX_INTRON_GROUP_NUM to 1000 to account for denser SpliceAI prediction layout.
+
 ## v2.0.9
 * `run` mode:
     * Paralog annotation is now possible even for transcripts with existing orthologous chains with `--annotate_paralogs` flag. Paralogs annotated this way are retained only if they have loss status of at least *UL*, and no more than 5 paralogs with predicted orthologs per query locus are kept in the annotation.
-    * `tmp/` directory is now created at user's `$TMPDIR` addressed to by a local symlink. The original behavior can be restored by setting `--local_tmp` flag.
+* `tmp/` directory is now created at user's `$TMPDIR` addressed to by a local symlink. The original behavior can be restored by setting `--local_tmp` flag.
 * `prepare-input` mode:
     * Annotation and isoform file can be now generated from a GFF3/GTF file;
     * Minimal intron length and nonsense-mediated decay (NMD) filters for reference transcripts;
@@ -22,7 +32,8 @@
         * Colon (":") symbol now accepted in gene/transcript names (also applies to `run` mode)
         * `--strip_versions` argument for chromosome (scaffold, contig, etc.) and transcript version removal (v2.0.9c)
     * `run` mode:
-        * `parallel_job_manager.py`: Fixed compatibility with Nextflow v2 parser (v2.0.9f)
+        * `parallel_job_manager.py`:
+            Fixed compatibility with Nextflow v2 parser (v2.0.9f)
         * `preprocessing.py` + `cesar_preprocess.py`:
             * Fixed zero donor flank handling at sequence extraction (v2.0.9b);
         * `prepare_pseudogene_track.py`:

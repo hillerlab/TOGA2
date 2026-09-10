@@ -7,7 +7,6 @@ Stage: build
 %environment
     export PATH=$HOME/.cargo/bin:/opt/nextflow:/opt/conda/bin:/opt/TOGA2:/opt/TOGA2/bin:/opt/TOGA2/bin/prank:/opt/TOGA2/bin/iqtree2:/opt/TOGA2/bin/intronIC:$PATH
     export SHELL=/bin/bash
-    export NXF_HOME=$TMPDIR/.nextflow
     source /opt/TOGA2/toga2/bin/activate
 
 %post
@@ -68,10 +67,7 @@ Stage: build
     # source toga2/bin/activate
     # export LD_LIBRARY_PATH=/usr/lib64:$LD_LIBRARY_PATH
     export SLURM_CONF=$SLURM_CONF
-    export NXF_HOME=$TMPDIR/.nextflow
     export EXEC_DIR=$EXEC_DIR
-    # export LD_LIBRARY_PATH=/host/usr/lib64:$LD_LIBRARY_PATH
-    export PATH=$EXEC_DIR:$HOME/.cargo/bin:/opt/nextflow:/opt/conda/bin:/opt/TOGA2:/opt/TOGA2/bin:/opt/TOGA2/bin/prank:/opt/TOGA2/bin/iqtree2:/opt/TOGA2/bin/intronIC:$PATH
     export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:$LIB_DIR
     # exec toga2.py "$@"
     # ./toga2.py
