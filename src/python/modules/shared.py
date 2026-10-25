@@ -1,50 +1,38 @@
-#!/usr/bin/env python3
-
 """
 Shared functionality across the scripts
 """
 
 import ctypes
 import fcntl
+import gzip
 import logging
 import os
 import subprocess
 import sys
 import time
+from collections.abc import Callable, Iterable
 from datetime import datetime
 from logging import Formatter
 from shutil import copy2, move, rmtree
-from typing import (
-    Any,
-    Callable,
-    Dict,
-    Iterable,
-    List,
-    Optional,
-    Set,
-    TextIO,
-    Tuple,
-    Union,
-)
+from typing import Any, Final, TextIO
 
 import click
 import click_option_group
-import gzip
 import networkx as nx
 from click_option_group import OptionGroup
 
 ## Constants
-CONTEXT_SETTINGS: Dict[str, Any] = {
+CONTEXT_SETTINGS: Final[dict[str, Any]] = {
     "help_option_names": ["-h", "-help", "--help"],
     "ignore_unknown_options": True,
     "allow_extra_args": True,
     "max_content_width": 150,
 }
 ## borrowed from splitFile
-SPLIT_JOB_HEADER: Tuple[str, str, str] = ("#!/bin/bash", "set -eu", "set -o pipefail")
+SPLIT_JOB_HEADER: Final[tuple[str, str, str]] = ("#!/bin/bash", "set -eu", "set -o pipefail")
 SLIB_NAME = "chain_bst_lib.so"
 UTF8: str = "utf-8"
-FORMATTER: Formatter = Formatter(
+FORMATTER: Final[Formatter] = Formatter(
     # "[{asctime}][{filename}] - {levelname}: {message}",
     "[{asctime}][{toga_module}] - {levelname}: {message}",
     style="{",
@@ -52,7 +40,7 @@ FORMATTER: Formatter = Formatter(
 )
 
 ## Sequence handling & score calculation data
-COMPLEMENT: Dict[str, str] = {
+COMPLEMENT: Final[dict[str, str]] = {
     "A": "T",
     "T": "A",
     "G": "C",
@@ -67,12 +55,12 @@ COMPLEMENT: Dict[str, str] = {
 }
 
 ## Types
-Numeric = Union[float, int]
+Numeric = float | int
 
 
 class PrettyGroup(OptionGroup):
-    def get_help_record(self, ctx: click.Context) -> Optional[Tuple[str, str]]:
-        init_help: Union[Tuple[str, str], None] = super().get_help_record(ctx)
+    def get_help_record(self, ctx: click.Context) -> tuple[str, str] | None:
+        init_help: tuple[str, str] | None = super().get_help_record(ctx)
         if init_help is None:
             return None
         return "\n" + init_help[0], init_help[1]
@@ -86,12 +74,12 @@ class DependentOption(click_option_group.GroupedOption):
 
     def __init__(self, *args, **kwargs) -> None:
         ## mutex functionality: deprecate the joint use of mutually exclusive options
-        self.competes_with: Union[List[str], None] = kwargs.pop("competes_with", None)
+        self.competes_with: list[str] | None = kwargs.pop("competes_with", None)
         self.required_mutex: bool = kwargs.pop("required_mutex", False)
         ## dependence functionality: enforce the use of the option in tandem with its dependencies
-        self.requires: Union[List[str], None] = kwargs.pop("requires", None)
+        self.requires: list[str] | None = kwargs.pop("requires", None)
         ## 'soft dependence' functionality: enforce the use of the option unless alternative is provided
-        self.not_required_if: Union[List[str], None] = kwargs.pop(
+        self.not_required_if: list[str] | None = kwargs.pop(
             "not_required_if", None
         )
         # if kwargs["help"] and self.competes_with is not None:
@@ -253,52 +241,34 @@ class DependentOption(click_option_group.GroupedOption):
 
 
 class TogaDirConfig:
-    ## NOTE: Slots are currently deprecated due to Postoga using vars() when logging starting args
-    ## TO be changed after the respective change is pushed to Postoga
-    # __slots__ = (
-    #     "togadir",
-    #     "orthology_class",
-    #     "loss_status",
-    #     "orthology_score",
-    #     "to",
-    #     "bed_type",
-    #     "min_paralog_score",
-    #     "with_isoforms",
-    #     "extract",
-    #     "outdir",
-    #     "only_table",
-    #     "only_convert",
-    #     "log_level",
-    #     "depure",
-    # )
 
     def __init__(
         self,
         togadir: os.PathLike,
-        by_loss_status: Optional[Union[str, None]] = None,
-        by_orthology_class: Optional[Union[str, None]] = None,
-        by_orthology_score: Optional[Union[float, None]] = None,
-        to: Optional[str] = "bed",
-        target: Optional[str] = "utr",
-        by_paralog_score: Optional[Union[float, None]] = None,
-        with_isoforms: Optional[Union[os.PathLike, None]] = None,
-        extract: Optional[Union[bool, str]] = False,
-        outdir: Optional[Union[os.PathLike, None]] = None,
-        only_table: Optional[bool] = True,
-        only_convert: Optional[bool] = False,
-        level: Optional[str] = "warning",
-        depure: Optional[bool] = True,
+        by_loss_status: str | None = None,
+        by_orthology_class: str | None = None,
+        by_orthology_score: float | None = None,
+        to: str = "bed",
+        target: str = "utr",
+        by_paralog_score: float | None = None,
+        with_isoforms: os.PathLike | None = None,
+        extract: bool | str = False,
+        outdir: os.PathLike | None = None,
+        only_table: bool = True,
+        only_convert: bool = False,
+        level: str = "warning",
+        depure: bool = True,
     ) -> None:
         self.togadir: os.PathLike = togadir
-        self.loss_status: Union[str, None] = by_loss_status
-        self.orthology_class: Union[str, None] = by_orthology_class
-        self.orthology_score: Union[float, None] = by_orthology_score
+        self.loss_status: str | None = by_loss_status
+        self.orthology_class: str | None = by_orthology_class
+        self.orthology_score: float | None = by_orthology_score
         self.to: str = to
         self.bed_type: str = target
-        self.min_paralog_score: Union[float, None] = by_paralog_score
-        self.with_isoforms: Union[os.PathLike, None] = with_isoforms
-        self.extract: Union[bool, str] = extract
-        self.outdir: Union[os.PathLike, None] = outdir
+        self.min_paralog_score: float | None = by_paralog_score
+        self.with_isoforms: os.PathLike | None = with_isoforms
+        self.extract: bool | str = extract
+        self.outdir: os.PathLike | None = outdir
         self.only_table: bool = only_table
         self.only_convert: bool = only_convert
         self.log_level: str = level
@@ -368,15 +338,15 @@ def segment_base(projection: str) -> str:
     return projection.split("$")[0]
 
 
-def get_proj2trans(projection: str) -> Tuple[str, str]:
+def get_proj2trans(projection: str) -> tuple[str, str]:
     """Safely extract transcript name from the chain projection name"""
-    data: List[str] = projection.split("$")[0].split("#")
+    data: list[str] = projection.split("$")[0].split("#")
     if data[-1] == "retro" or data[-1] == "paralog":
         data = data[:-1]
     return "#".join(data[:-1]), data[-1]
 
 
-def safe_div(dividend: Union[float, int], divisor: Union[float, int]) -> float:
+def safe_div(dividend: float, divisor: float) -> float:
     """Divides dividend by divisor, return zero if divisor equals zero"""
     if not divisor:
         return 0.0
@@ -407,12 +377,21 @@ def safe_make_dir(dir: str) -> None:
     os.makedirs(dir) if not os.path.isdir(dir) else None
 
 
-def intersection(start1: int, end1: int, start2: int, end2: int) -> int:
+def intersection(s1: int, e1: int, s2: int, e2: int) -> int:
     """
-    Returns intersection length between two segments with coordinates
-    (start1, end1) and (start2, end2); values smaller than one indicate no intersection
+    Assesses intersection size between the two intervals:
+    
+    Arguments:
+        * s1: int, start of the first interval
+        * s2: int, start of the second interval
+        * e1: int, end of the first interval
+        * e2: int, end of the first interval
+
+    Returns:
+        int, size of the intersection. Negative value indicates lack of intersection,
+        zero value indicates that the items are adjacent one to another
     """
-    return min(end1, end2) - max(start1, start2)
+    return min(e1, e2) - max(s1, s2)
 
 
 def chain_extract_id(index_file, chain_id, chain_file=None):
@@ -495,17 +474,15 @@ def make_cds_track(line):
         blockEnd = block_abs_ends[block_num]
 
         # skip the block if it is entirely UTR
-        if blockEnd <= thick_start:
-            continue
-        elif blockStart >= thick_end:
+        if blockEnd <= thick_start or blockStart >= thick_end:
             continue
 
         # if we are here: this is not an entirely UTR exon
         # it might intersect the CDS border or to be in the CDS entirely
         # remove UTRs: block start must be >= CDS_start (thick_start)
         # block end must be <= CDS_end (thick_end)
-        block_new_start = blockStart if blockStart >= thick_start else thick_start
-        block_new_end = blockEnd if blockEnd <= thick_end else thick_end
+        block_new_start = max(blockStart, thick_start)
+        block_new_end = min(blockEnd, thick_end)
         # save blocks with updated coordinates
         # also convert them back to relative coordinates with - thick_start
         # after the update thick_start/End are equal to chrom_start/End
@@ -538,11 +515,11 @@ def make_cds_track(line):
     return new_line
 
 
-def get_connected_components(graph: nx.Graph) -> List[nx.Graph]:
+def get_connected_components(graph: nx.Graph) -> list[nx.Graph]:
     """ """
     ## check the NetworkX version
     nx_v: str = nx.__version__
-    v_split: List[str] = [x for x in nx_v.split(".") if x.isnumeric()]
+    v_split: list[str] = [x for x in nx_v.split(".") if x.isnumeric()]
     if len(v_split) > 1:
         NX_VERSION: float = float(f"{v_split[0]}.{v_split[1]}")
     else:
@@ -554,11 +531,11 @@ def get_connected_components(graph: nx.Graph) -> List[nx.Graph]:
     return raw_components
 
 
-def parse_single_column(file: TextIO) -> Set[str]:
+def parse_single_column(file: TextIO) -> set[str]:
     """
     Parse single-column file into a string list. Simple as.
     """
-    output: Set[str] = set()
+    output: set[str] = set()
     if file is None:
         return output
     for line in file:
@@ -569,13 +546,13 @@ def parse_single_column(file: TextIO) -> Set[str]:
     return output
 
 
-def parse_fasta(file: str) -> Dict[str, str]:
+def parse_fasta(file: str) -> dict[str, str]:
     """
     A simple FASTA parser.
     Input is the file content.
     Input is a dictionary with sequence names as keys and aligned sequences as values.
     """
-    output: Dict[str, str] = dict()
+    output: dict[str, str] = {}
     key, seq, is_entry = "", "", False
     for line in file.split("\n"):
         if not line:
@@ -594,11 +571,11 @@ def parse_fasta(file: str) -> Dict[str, str]:
     return output
 
 
-def parse_score_file(filter_file: TextIO, score_column: int) -> Dict[str, Numeric]:
-    out_dict: Dict[str, Numeric] = {}
-    for line in filter_file.readlines():
+def parse_score_file(filter_file: TextIO, score_column: int) -> dict[str, Numeric]:
+    out_dict: dict[str, Numeric] = {}
+    for line in filter_file():
         line: str = line.strip()
-        line_data: List[str] = line.split("\t")
+        line_data: list[str] = line.split("\t")
         if len(line_data) < 2:
             continue
         exon_name: str = line_data[0]
@@ -611,7 +588,7 @@ def parse_score_file(filter_file: TextIO, score_column: int) -> Dict[str, Numeri
     return out_dict
 
 
-def parse_one_column(file: Union[str, TextIO]) -> List[str]:
+def parse_one_column(file: str | TextIO) -> list[str]:
     """
     Parse single-column file into a string list. Simple as.
     """
@@ -631,13 +608,13 @@ def read_tab(file: str, sep: str = "\t") -> Iterable[str]:
             for line in h:
                 if gzipped:
                     line = line.decode("utf8")
-                data: List[str] = line.strip().split(sep)
+                data: list[str] = line.strip().split(sep)
                 if not data or not data[0]:
                     continue
                 yield data
     else:
         for line in file:
-            data: List[str] = line.strip().split(sep)
+            data: list[str] = line.strip().split(sep)
             if not data or not data[0]:
                 continue
             yield data
@@ -678,7 +655,7 @@ class Lock:
         self.lockfile: str = lockfile
         self.retry: float = retry
         self.timeout: float = timeout
-        self.filehandle: Union[TextIO, None] = None
+        self.filehandle: TextIO | None = None
 
     def __enter__(self) -> TextIO:
         print(self.lockfile, self.retry, self.timeout)
@@ -696,7 +673,7 @@ class Lock:
                 fcntl.flock(fh, fcntl.LOCK_EX | fcntl.LOCK_NB)
                 is_available = True
                 break
-            except (IOError, OSError):
+            except OSError:
                 print("Lock not acquired; waiting")
                 time.sleep(self.retry)  ## sleep the expected amount of time
                 curr_time = time.time()
@@ -717,13 +694,13 @@ class Lock:
 
 
 class CommandLineManager:
-    __slots__ = ("v", "debug", "logger")
+    __slots__ = ("debug", "logger", "v",)
     """
     A minimal functionality class to be decorated with Click functionality and
     further extended to suit particular scripts' needs
     """
 
-    def set_logging(self, name: str = __name__, toga_module: str = None) -> None:
+    def set_logging(self, name: str = __name__, toga_module: str | None = None) -> None:
         """
         Sets up logging system for a TogaMain instance
         """
@@ -754,7 +731,7 @@ class CommandLineManager:
             self.logger.addHandler(console_handler)
         self.logger = logging.LoggerAdapter(self.logger, {"toga_module": toga_module})
 
-    def _to_log(self, msg: str, level: Optional[str] = "info") -> None:
+    def _to_log(self, msg: str, level: str = "info") -> None:
         """Logs a message at a given level
 
         Args:
@@ -857,9 +834,9 @@ class CommandLineManager:
 
     def _exec(
         self,
-        cmd: Union[str, List[str]],
+        cmd: str | list[str],
         err_msg: str,
-        input_: bytes = None,
+        input_: bytes | None = None,
         die: bool = True,
         shun_verbosity: bool = True,
         gather_stdout: bool = True,

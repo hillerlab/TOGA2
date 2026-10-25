@@ -120,7 +120,7 @@ class NmdConstants:
 def add_prefix(template: str, prefix: str | None = "") -> str:
     """Adds a prefix to the output file name
 
-    Args:
+    Arguments:
         prefix: A prefix to add to the file name. Can be empty.
         template: A file name template.
 
@@ -228,7 +228,7 @@ class InputProducer(CommandLineManager):
                 sequence is at least 400 bases long;
                 * Coding sequence is shorter than 100 bases.
 
-        Args:
+        Arguments:
             * thin_start: int - sequence start in the genome, including UTRs;
             * thin_end: int - sequence end in the genome, including UTRs;
             * cds_start: int - coding sequence start in the genome;
@@ -298,7 +298,7 @@ class InputProducer(CommandLineManager):
         If a name contains no dot symbols, returns the input string. If a name starts with leading dots,
         strips them beforehand.
 
-        Args:
+        Arguments:
             name: item name
 
         Returns:
@@ -546,7 +546,7 @@ class InputProducer(CommandLineManager):
         """
         Prepares annotation from a GTF/GFF3 file
 
-        Args:
+        Arguments:
             None
 
         Returns:
@@ -702,6 +702,12 @@ class InputProducer(CommandLineManager):
         """
         Filters reference annotation by the following criteria:
         * All transcripts in the final annotation must be
+
+        Arguments:
+            None
+
+        Returns:
+            None
         """
         illegal_name: set[str] = set()
         rejected_contigs: set[str] = set()
@@ -918,11 +924,23 @@ class InputProducer(CommandLineManager):
                 ),
                 "warning",
             )
+            ## TODO: Replace `self.rejected_lines` with dict to enable fast ejection mechanism
+            ## (see `check_isoforms()`)
             self.rejected_transcripts.update(nmd_targets)
             self.rejected_lines.extend(
                 [RejectionReasons.NMD_REASON.format(x) for x in nmd_targets]
             )
         ## proceed further
+
+    def report_fusions(self) -> None:
+        """
+        Finds isoforms fusing two or more otherwise disjoint genes:
+        """
+
+    def report_fissions(self) -> None:
+        """
+        Finds isoforms attributed to the same gene but not overlapping by absolute coordinates:
+        """
 
     def check_isoforms(self) -> None:
         """
@@ -1063,7 +1081,15 @@ class InputProducer(CommandLineManager):
                     h.write(line + "\n")
 
     def write_rejection_log(self) -> None:
-        """Writes the rejected items to the file"""
+        """
+        Writes the rejected items to the file
+
+        Arguments:
+            None
+
+        Returns:
+            None
+        """
         if not self.rejected_lines:
             return
         self._to_log(f"Writing the rejected items to {self.rejection_log}")
@@ -1072,7 +1098,20 @@ class InputProducer(CommandLineManager):
             h.writelines(self.rejected_lines)
 
     def create_sleasy_input(self) -> None:
-        """Creates a 2bit exon storage for SLEASY compatibility"""
+        """
+        Creates a 2bit exon storage for SLEASY compatibility
+
+        Arguments:
+            None
+
+        Returns:
+            None
+
+        Raises:
+            Error-exits if any of the launched subprocesses 
+            (bed12ToFraction, twoBitToFa, faToTwoBit) fails or if provisional BED file 
+            was improperly sorted
+        """
 
         self._to_log("Writing temporary BED6 file")
         bed6_cmd: str = (
@@ -1148,6 +1187,16 @@ class InputProducer(CommandLineManager):
         This file can be further used with TOGA2 runs provided with the --ut12_file/-u2 option.
         If CESAR2 profile annotation is requested, the same predictions are further used
         to generate reference-specific profiles.
+
+        Arguments:
+            None
+
+        Returns:
+            None
+
+        Raises:
+            Error-exists if any of subprocesses 
+            (twoBitToFa, bed12ToFraction, BED sorting, intronIC) fails
         """
         ## temporarily decompress the reference .2bit genome file
         self._to_log("Converting .2bit genome into Fasta format")
@@ -1204,7 +1253,6 @@ class InputProducer(CommandLineManager):
                     if (data[4] == "." or data[4] == "NA")
                     else int(float(data[4]) * 10)
                 )
-                # intron2coords[name] = f'{data[0]}\t{data[1]}\t{data[2]}\t{{}}\t{score}\t{data[5]}'
                 intron2coords[name] = (
                     data[0],
                     data[1],
@@ -1274,7 +1322,17 @@ class InputProducer(CommandLineManager):
 
     def generate_cesar_profiles(self) -> None:
         """
-        Given the intronIC classification for filtered annotation reference introns
+        Given the intronIC classification for filtered annotation reference introns, 
+        creates reference-specific CESAR2 profiles
+
+        Arguments:
+            None
+
+        Returns:
+            None
+
+        Raises:
+            Error-exits if the launched twoBitToFa subprocess fails
         """
         ## step 1: prepare profile sequence coordinates in Bed format
         bed_string: str = ""
@@ -1322,7 +1380,7 @@ class InputProducer(CommandLineManager):
                     seq = seq.upper().strip("\n")
                     intron_class, canon = self.intron2class[num]
                     ## update the respective CESAR2 profile
-                    self._update_profile(seq, intron_class, canon, site_type, num)
+                    self._update_profile(seq, intron_class, canon, site_type)
                     seq = ""
                 header = line[1:]
             else:
@@ -1332,7 +1390,7 @@ class InputProducer(CommandLineManager):
             seq = seq.upper()
             intron_class, canon = self.intron2class[num]
             ## again, update the respective profile for the final item
-            self._update_profile(seq, intron_class, canon, site_type, num)
+            self._update_profile(seq, intron_class, canon, site_type)
 
         ## step 3: compute the letter probabilities per position from the recorded frequencies
         ## and write the resulting profiles
@@ -1379,10 +1437,29 @@ class InputProducer(CommandLineManager):
             self._rmdir(self.tmp_dir)
 
     def _update_profile(
-        self, seq: str, intron_class: str, canon: bool, site: str, num: str
+        self, seq: str, intron_class: str, canon: bool, site: str,
     ) -> None:
         """
-        Updates the CESAR2 profile with respect to spliceosomal class, 'canonicity', and splice site
+        Updates the CESAR2 profile with respect to spliceosomal class, 'canonicity', 
+        and splice site
+
+        Arguments:
+            seq: str, nucleotide sequence
+            intron_class: str, either U2 or U12 class
+            canon: bool, intron canonicity indicator
+            site: str, either donor or acceptor identifier
+
+        Returns:
+            None
+
+        Raises:
+            Error-exits if:
+                * ambiguous site identifier was provided
+                * input sequence is longer than consensus for the specified splice site
+                * ambiguous symbol has been encountered in the sequence
+
+        Note:
+            Updates probability matrix per position for the indicated intron class and splice site
         """
         if site not in (DONOR, ACC):
             self._die(f"Unknown site type received as input: {site}")
