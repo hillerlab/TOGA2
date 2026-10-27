@@ -53,6 +53,10 @@ COMPLEMENT: Final[dict[str, str]] = {
     "n": "n",
     "-": "-",
 }
+ALLOWED_CHARSET: tuple[int, ...] = (
+    35, *range(45, 59), *range(65, 91), 95, *range(97, 123), 124
+)
+
 
 ## Types
 Numeric = float | int
@@ -276,6 +280,19 @@ class TogaDirConfig:
 
 
 ## Executables
+def consistent_name(name: str) -> bool:
+    """
+    Checks whether only the allowed symbols are used in the transcript name
+
+    Arguments:
+        name: str, input transcript/gene name
+
+    Returns:
+        bool, indication whether the name contains approved symbols only
+    """
+    return all(ord(x) in ALLOWED_CHARSET for x in name)
+
+
 def timestamp() -> str:
     """Returns the current date- and timestamp"""
     return datetime.now().strftime("%H:%M_%d.%m.%y")

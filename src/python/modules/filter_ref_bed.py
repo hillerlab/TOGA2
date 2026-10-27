@@ -9,7 +9,7 @@ from typing import Final
 import click
 
 from .constants import RejectionReasons
-from .shared import CONTEXT_SETTINGS, CommandLineManager
+from .shared import CONTEXT_SETTINGS, CommandLineManager, consistent_name
 
 LOCATION: Final[str] = os.path.dirname(os.path.abspath(__file__))
 PARENT: Final[str] = os.sep.join(LOCATION.split(os.sep)[:-1])
@@ -19,17 +19,6 @@ __author__ = "Yury V. Malovichko"
 __year__ = "2024"
 __credits__ = "Bogdan M. Kirilenko"
 __all__ = ()
-
-ALLOWED_CHARSET: tuple[int, ...] = (
-    35, *range(45, 59), *range(65, 91), 95, *range(97, 123), 124
-)
-
-
-def consistent_name(name: str) -> bool:
-    """
-    Checks whether only the allowed symbols are used in the transcript name
-    """
-    return all(ord(x) in ALLOWED_CHARSET for x in name)
 
 
 @click.command(context_settings=CONTEXT_SETTINGS, no_args_is_help=True)

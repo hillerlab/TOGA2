@@ -17,10 +17,10 @@ from typing import Final
 import click
 
 from .constants import Headers, RejectionReasons
-from .filter_ref_bed import consistent_name
 from .gxf import Gxf
 from .shared import (
     CommandLineManager,
+    consistent_name,
     dir_name_by_date,
     get_upper_dir,
     hex_dir_name,
