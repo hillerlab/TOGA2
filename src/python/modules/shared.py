@@ -567,7 +567,13 @@ def get_connected_components(graph: nx.Graph) -> list[nx.Graph]:
 
 def parse_single_column(file: TextIO) -> set[str]:
     """
-    Parse single-column file into a string list. Simple as.
+    Parse single-column file into a string set. Simple as.
+
+    Arguments:
+        file: file handle to the input file
+
+    Returns:
+        set, collection of file lines
     """
     output: set[str] = set()
     if file is None:
