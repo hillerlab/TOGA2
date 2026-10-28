@@ -53,15 +53,11 @@ COMPLEMENT: Final[dict[str, str]] = {
     "n": "n",
     "-": "-",
 }
-ALLOWED_CHARSET: tuple[int, ...] = (
+ALLOWED_CHARSET: Final[tuple[int, ...]] = (
     35, *range(45, 59), *range(65, 91), 95, *range(97, 123), 124
 )
 
-
 ## Types
-Numeric = float | int
-
-
 class PrettyGroup(OptionGroup):
     def get_help_record(self, ctx: click.Context) -> tuple[str, str] | None:
         init_help: tuple[str, str] | None = super().get_help_record(ctx)
@@ -291,6 +287,27 @@ def consistent_name(name: str) -> bool:
         bool, indication whether the name contains approved symbols only
     """
     return all(ord(x) in ALLOWED_CHARSET for x in name)
+
+
+def replace_illegal_characters(name: str) -> str:
+    """
+    Modifies the sequence name by replacing all illegal symbols to 
+    uppercase English alphabet. The substitution logic is reproducible 
+    but degenerate (i.e, multiple ASCII symbols map to the same letter)
+
+    Arguments:
+        name: str, sequence name
+
+    Returns:
+        str, a modified name
+    """
+    output: list[str] = []
+    for ch in name:
+        if ord(ch) in ALLOWED_CHARSET:
+            output.append(ch)
+        else:
+            output.append(chr(ord('A') + ord(ch) % 26))
+    return "".join(output)
 
 
 def timestamp() -> str:
@@ -588,8 +605,8 @@ def parse_fasta(file: str) -> dict[str, str]:
     return output
 
 
-def parse_score_file(filter_file: TextIO, score_column: int) -> dict[str, Numeric]:
-    out_dict: dict[str, Numeric] = {}
+def parse_score_file(filter_file: TextIO, score_column: int) -> dict[str, float]:
+    out_dict: dict[str, float] = {}
     for line in filter_file():
         line: str = line.strip()
         line_data: list[str] = line.split("\t")
@@ -619,7 +636,7 @@ def parse_one_column(file: str | TextIO) -> list[str]:
 def read_tab(file: str, sep: str = "\t") -> Iterable[str]:
     """Read a TSV file line by line, yield a generator of field-split lines"""
     if type(file) is str:
-        gzipped: bool = file.endswith(".gz") or file.endswith("gzip")
+        gzipped: bool = file.endswith((".gz", "gzip"))
         opener: Callable[str] = gzip.open if gzipped else open
         with opener(file, "r") as h:
             for line in h:
@@ -649,7 +666,7 @@ def is_locked(file: str) -> bool:
     try:
         with open(file, "a"):
             pass
-    except IOError:
+    except OSError:
         return True
 
     dummy: str = file + ".dummy"
@@ -657,7 +674,7 @@ def is_locked(file: str) -> bool:
         copy2(file, dummy)
         os.remove(dummy)
         return False
-    except WindowsError:
+    except OSError:
         return True
 
 
@@ -801,8 +818,7 @@ class CommandLineManager:
             copy2(from_, to_)
         except Exception as e:
             self._die(
-                ("Unexpected behavior when trying to copy from %s to %s: \n")
-                % (from_, to_)
+                f"Unexpected behavior when trying to copy from {from_} to {to_}: \n"
                 + e
             )
 
@@ -823,7 +839,7 @@ class CommandLineManager:
         except FileNotFoundError:
             pass
         except Exception:
-            self._die("Unexpected behavior observed while trying to remove %s" % f)
+            self._die(f"Unexpected behavior observed while trying to remove {f}")
 
     def _rmdir(self, d: os.PathLike) -> None:
         """Recursive directory deletion method"""
@@ -837,7 +853,7 @@ class CommandLineManager:
         except FileNotFoundError:
             pass
         except Exception:
-            self._die("Unexpected behavior observed while trying to remove %s" % d)
+            self._die(f"Unexpected behavior observed while trying to remove {d}")
 
     def _mv(self, file: os.PathLike, dest: os.PathLike) -> None:
         """Moves a file or directory to a new location"""
