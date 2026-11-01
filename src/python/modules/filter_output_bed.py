@@ -1,10 +1,8 @@
-#!/usr/bin/env python3
-
 """
 Filters TOGA2 output BED files and adds the necessary postfixes
 """
 
-from typing import List, Optional, Set, TextIO, Union
+from typing import TextIO
 
 import click
 
@@ -89,38 +87,38 @@ I_COL: str = "0,0,200"
 )
 class OutputBedFilter(CommandLineManager):
     __slots__ = (
-        "discarded_projs",
         "discarded_bed_lines",
         "discarded_file",
+        "discarded_projs",
         "paralog_projs",
-        "ppgene_projs",
         "ppgene_bed_lines",
         "ppgene_file",
+        "ppgene_projs",
     )
 
     def __init__(
         self,
         input_bed: click.File,
         output_bed: click.File,
-        deprecated_projection_list: Optional[Union[click.File, None]],
-        deprecated_projection_bed: Optional[Union[click.File, None]],
-        paralog_list: Optional[Union[click.File, None]],
-        processed_pseudogene_list: Optional[Union[click.File, None]],
-        processed_pseudogene_bed: Optional[Union[click.File, None]],
-        log_name: Optional[str],
-        verbose: Optional[bool],
+        deprecated_projection_list: click.File | None = None,
+        deprecated_projection_bed: click.File | None = None,
+        paralog_list: click.File | None = None,
+        processed_pseudogene_list: click.File | None = None,
+        processed_pseudogene_bed: click.File | None = None,
+        log_name: str | None = None,
+        verbose: bool = False,
     ) -> None:
         self.v: bool = verbose
         self.set_logging(name=log_name, toga_module="query_fasta_filter")
 
-        self.discarded_projs: Set[str] = parse_single_column(deprecated_projection_list)
-        self.discarded_bed_lines: List[str] = []
-        self.discarded_file: Union[click.File, None] = deprecated_projection_bed
+        self.discarded_projs: set[str] = parse_single_column(deprecated_projection_list)
+        self.discarded_bed_lines: list[str] = []
+        self.discarded_file: click.File | None = deprecated_projection_bed
 
-        self.paralog_projs: Set[str] = parse_single_column(paralog_list)
-        self.ppgene_projs: Set[str] = parse_single_column(processed_pseudogene_list)
-        self.ppgene_bed_lines: List[str] = []
-        self.ppgene_file: Union[click.File, None] = processed_pseudogene_bed
+        self.paralog_projs: set[str] = parse_single_column(paralog_list)
+        self.ppgene_projs: set[str] = parse_single_column(processed_pseudogene_list)
+        self.ppgene_bed_lines: list[str] = []
+        self.ppgene_file: click.File | None = processed_pseudogene_bed
 
         self.parse_and_filter_bed(input_bed, output_bed)
         self.write_discarded_projections()
@@ -132,7 +130,7 @@ class OutputBedFilter(CommandLineManager):
         and writes the filtered output to another file
         """
         for line in input_:
-            data: List[str] = line.rstrip().split("\t")
+            data: list[str] = line.rstrip().split("\t")
             if not data or not data[0]:
                 continue
             name: str = data[3]
