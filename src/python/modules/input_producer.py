@@ -8,10 +8,14 @@ __year__ = "2025"
 
 import logging
 import os
-from collections import defaultdict
+from collections import Counter, defaultdict
+from collections.abc import Callable, Sequence
 from contextlib import nullcontext
-from enum import IntEnum
+from dataclasses import dataclass
+from enum import Enum, IntEnum
+from functools import partial
 from shutil import which
+from types import ModuleType
 from typing import Final
 
 import click
@@ -20,18 +24,21 @@ from .constants import Headers, RejectionReasons
 from .gxf import Gxf
 from .shared import (
     CommandLineManager,
+    cluster_suffix,
     consistent_name,
     dir_name_by_date,
     get_upper_dir,
     hex_dir_name,
     intersection,
     read_tab,
+    replace_illegal_characters,
 )
 
 logging.root.handlers = []
 
 DEFAULT_PREFIX: Final[str] = "TOGA2_ref_annotation"
 LEVEL: Final[str] = "level"
+GENE: Final[str] = "GENE"
 TRANSCRIPT: Final[str] = "TRANSCRIPT"
 ILLEGAL_NAME: Final[str] = "ILLEGAL_NAME"
 REJECTED_CONTIG: Final[str] = "REJECTED_CONTIG"
@@ -88,6 +95,9 @@ IMMUNE_ISOFORMS: Final[str] = "toga.immunoglobulin_isoforms.tsv"
 IMMUNE_GENE_BED: Final[str] = "toga.immunoglobulin_genes.bed"
 SLEASY: Final[str] = "sleasy.exons.2bit"
 REJ_LOG: Final[str] = "rejected_items.tsv"
+RENAME_MAP: Final[str] = "rename_map.tsv"
+FISSION_MAP: Final[str] = "fission_map.tsv"
+FUSION_MAP: Final[str] = "fusion_map.tsv"
 EXON_BED6: Final[str] = "all_exons.bed6"
 FA_FOR_SLEASY: Final[str] = "all_exons.fasta"
 PROV_BED: Final[str] = "transcripts.from_gxf.raw.bed"
@@ -109,6 +119,62 @@ BIN2DEFAULT: Final[dict[str, str]] = {
     "intronIC": DEFAULT_INTRONIC,
 }
 
+NEWTAB: Final[str] = "\n\t"
+
+
+## Enums
+class BridgeType(Enum):
+    SELF  = "Self-isoform bridge"
+    FUS_ISO = "Fusion isoform"
+    FUSION = "Fusion gene"
+    COMBINED = "Fusion + fission"
+
+
+class IsNMD(IntEnum):
+    """Levels of nonsense-mediated decay (NMD) signatures detected"""
+    NO = 0
+    WEAK = 1
+    STRONG = 2
+
+
+class RejEnum(IntEnum):
+    """Rejection reason enumeration"""
+    NON_CODING = 0
+    FRAME = 1
+    CONTIG = 2
+    NAME = 3
+    FISSION_GENE = 4
+    FISSION_TR = 5
+    FUSION_GENE = 6
+    FUSION_TR = 7
+    ORPHAN = 8
+    SHORT_EXON = 9
+    SHORT_INTRON = 10
+    NMD = 11
+    GENE = 12
+
+
+## Classes
+@dataclass(frozen=True)
+class FissionReport:
+    gene: str
+    units: list[tuple[str, int]]
+    bridges: list[str]
+
+
+@dataclass(frozen=True)
+class FusionReport:
+    node: tuple[str, int]
+    bridge_type: BridgeType
+    fusion_map: dict[str, list[list[str]]]
+    split_genes: list[str]
+
+
+@dataclass(frozen=True)
+class FaultyModelReport:
+    fissions: list[FissionReport]
+    fusions: list[FusionReport]
+
 
 class NmdConstants:
     STOP_JUNCTION_DIST: int = 55
@@ -117,6 +183,17 @@ class NmdConstants:
     BIG_EXON_JUNCTION_DIST: int = 400
 
 
+@dataclass(frozen=True)
+class Transcript:
+    chrom: str
+    start: int
+    end: int
+    strand: bool
+    exons: list[tuple[int, int]]
+    line: str
+
+
+## Functions
 def add_prefix(template: str, prefix: str | None = "") -> str:
     """Adds a prefix to the output file name
 
@@ -132,10 +209,36 @@ def add_prefix(template: str, prefix: str | None = "") -> str:
     return f"{prefix}.{template}"
 
 
-class IsNMD(IntEnum):
-    NO = 0
-    WEAK = 1
-    STRONG = 2
+def cds_exon_overlap(a: Transcript, b: Transcript, min_inter: int = 1) -> bool:
+    """
+    Computes coding sequence overlap. 
+
+    Arguments:
+        a, b: Transcript, transcript to assess the overlap between
+        min_inter: int, minimal overlap size between two exons, in bp
+
+    Returns:
+        bool, indication whether the sufficient overlap has been found
+    """
+    len_a: int = len(a.exons)
+    len_b: int = len(b.exons)
+    i = j = 0
+    while i < len_a and j < len_b:
+        s1, e1 = a.exons[i]
+        s2, e2 = b.exons[j]
+        if s1 > e2:
+            j += 1
+            continue
+        if e1 < s2:
+            i += 1
+            continue
+        if intersection(s1, e1, s2, e2) >= min_inter:
+            return True
+        if e1 < e2:
+            i += 1
+        else:
+            j += 1
+    return False
 
 
 class InputProducer(CommandLineManager):
@@ -144,20 +247,27 @@ class InputProducer(CommandLineManager):
     """
 
     __slots__ = (
-        'all_intron_bed', 
+        "all_intron_bed", 
         'annot', 
         'annot_format', 
         'bed2fraction_binary', 
         'bed6_exons', 
-        'contigs', 
+        'contigs',
         'disable_cesar_profiles', 
-        'disable_intron_classification', 
+        'disable_intron_classification',
+        "disable_models",
+        "do_not_correct_names",
         'excluded_contigs', 
         'fasta_for_sleasy', 
         'fatotwobit_binary', 
         'filtered_annotation', 
-        'filtered_isoforms', 
-        'gene_bed', 
+        'filtered_isoforms',
+        "fission_map_file",
+        "fusion_map_file",
+        "fusions",
+        "gene2fissions",
+        "gene2trs",
+        'gene_bed',
         'ic_cores', 
         'immune', 
         'immune_annotation', 
@@ -175,20 +285,24 @@ class InputProducer(CommandLineManager):
         'min_intron_length', 
         'min_intron_length_cesar', 
         'min_intron_length_intronic', 
-        'nmd_level', 
+        'nmd_level',
+        "no_gene_suffix",
         'output', 
         'profile_dir', 
         'profiles', 
         'provisional_bed', 
         'provisional_isoforms', 
-        'rejected_lines', 
-        'rejected_transcripts', 
-        'rejection_log', 
+        'rejection_log',
+        "rejection_reasons",
+        "remove_fissions",
+        "remove_fusions",
+        "rename_map",
+        "rename_map_file",
         'sleasy_2bit', 
         'strip_versions', 
         'tmp_dir', 
-        'tr2annot', 
-        'tr2coords', 
+        "tr2annot", 
+        "tr2gene",
         'twobit', 
         'twobittofa_binary', 
         'v',
@@ -218,15 +332,15 @@ class InputProducer(CommandLineManager):
             the threshold value (55 bases by default, according to the "55 bp rule");
 
             3. If 3'-UTR region contains at least one exon junction (=intron), and
-            the distance between the end of the coding sequence and the first UTR
+            the distance between the end of the coding sequence and the last UTR
             exon junction is more than 55 bp, the exon is considered a potential NMD target;
 
             4. The following conditions might hinder NMD, so fulfilling either of them
             downgrades the evidence for NMD to the "weak evidence" category:
-                * CDS-UTR junction distance is below 80 nucleotides (relaxed "55 bp rule");
+                * CDS-UTR junction distance is  <=80 nucleotides long (relaxed "55 bp rule");
                 * Stop-containing exon consists of both CDS and UTR, and the UTR
                 sequence is at least 400 bases long;
-                * Coding sequence is shorter than 100 bases.
+                * Coding sequence is <=100 bases long.
 
         Arguments:
             * thin_start: int - sequence start in the genome, including UTRs;
@@ -234,7 +348,7 @@ class InputProducer(CommandLineManager):
             * cds_start: int - coding sequence start in the genome;
             * cds_end: int - coding sequence end in the genome;
             * sizes: List[int] - list of exon sizes (BED12 field 11);
-            * sizes: List[int] - list of exon relative start coordinates (BED12 field 12);
+            * starts: List[int] - list of exon relative start coordinates (BED12 field 12);
             * strand: bool - True if strand is positive.
 
         Returns:
@@ -315,6 +429,139 @@ class InputProducer(CommandLineManager):
             return name
         return ".".join(comps[:-1])
 
+    @staticmethod
+    def _sides(node: tuple[str, int], adj: Sequence[str]) -> list[set[tuple[str, int]]]:
+        """
+        Returns subgraphs of the focal node's connected component after the node removal. 
+
+        Arguments:
+            node: tuple, name of the focal node (e.g., articulation node)
+            adj: dictionary or NetworkX Graph object
+
+        Returns:
+            list of connected components disjointed by removal of the focal node, 
+            represented by sets of node labels
+
+        Note:
+            Mimics the following NetworkX code:
+            ```
+            comp = nx.node_connected_component(adj, node)
+            return list(nx.connected_components(adj.subgraph(comp - {node})))
+            ```
+        """
+        seen, sides = {node}, []
+        for n in adj[node]:
+            if n in seen: 
+                continue
+            seen.add(n)
+            comp, stack = [n], [n]
+            while stack:
+                x = stack.pop()
+                for y in adj[x]:
+                    if y not in seen: 
+                        seen.add(y)
+                        comp.append(y)
+                        stack.append(y)
+            sides.append(comp)
+        return sides
+
+    @staticmethod
+    def _classify_bridge(
+        node: tuple[str, int], 
+        sides: list[set[tuple[str, int]]], 
+        members: dict[tuple[str, int], list[str]],
+        cross_unit: dict[str, set[tuple[str, int]]],
+    ) -> FusionReport:
+        """
+        Assesses whether the focal bridge transcript represents a fusion event
+
+        Bridging transcript is a transcript overlapping two or more transcripts that do not 
+        mutually overlap, e.g.:
+
+        ====tr1[***]====[***]============[***]====[***]tr1===
+        ====tr2[***]====[***]tr2======tr3[***]====[***]tr3===
+
+        In the overlap graph, bridging transcripts (or multi-transcript units) form articulation nodes; 
+        their removal from the graph creates a set of disjointed connected components.
+
+
+        Arguments:
+            node: str or tuple, an articulation node of an overlap graph (string or unit-like tuple)
+            side: list, two or more connected components disjointed by the ``node`` removal
+            members: dict, {unit -> [unit_members]} mapping between the gene unit 
+                and transcripts contained within it
+            cross_unit: {transcript -> {units}} mapping between transcripts and units 
+                of other genes they overlap
+
+        Returns:
+            FusionReport instance with the following fields:
+                * ``node`` - focal node name
+                * ``bridge_type`` - one of four BridgeType values
+                * ``fusion_map`` - dictionary mapping individual fusion isoforms 
+                    to units they bridge
+                * ``split`` - list of genes split between the bridged loci 
+                    (potential gene model fission)
+        """
+        ## expand "sides" into {transcript: subgraph} mapping
+        tr2side: dict[str, int] = {u: i for i, s in enumerate(sides) for u in s}
+        ## detect transcript-level fusions: 
+        ## transcripts overlapping other gene units in more than one subgraph
+        fusion_trs: list[str] = sorted(
+            t for t in members[node] if len({tr2side[u] for u in cross_unit.get(t, ())}) > 1
+        )
+        ## get the units these transcripts bridge
+        fusion_map: dict[str, list[list[str]]] = {
+            x: [members[u] for u in sorted(cross_unit[x])] for x in fusion_trs
+        }
+        ## whole-node bridge condition: all isoforms overlap at least one other gene
+        has_independent: bool = any(t not in cross_unit for t in members[node])
+        per_side: dict[int, int] = Counter(g for s in sides for g in {u[0] for u in s})
+        ## get genes occurring in more than one subgraph -> fissions coupled with fusion
+        split: list[str] = sorted(g for g, n in per_side.items() if n > 1)
+        if not has_independent:
+            bridge_type: BridgeType = BridgeType.COMBINED if split else BridgeType.FUSION
+        else:
+            bridge_type: BridgeType = BridgeType.FUS_ISO if fusion_trs else BridgeType.SELF
+        return FusionReport(node, bridge_type, fusion_map, split)
+
+    @classmethod
+    def _detect_faulty_models(
+        cls, 
+        members: dict[tuple[str, int], list[str]],
+        cross_unit: dict[str, set[tuple[str, int]]],
+        articulation_nodes: set[tuple[str, int]],
+        sides_fn: Callable[[tuple[str, int]], list[set[tuple[str, int]]]],
+    ) -> FaultyModelReport:
+        """
+        Arguments:
+            //
+
+        Returns:
+            FaultyModeReport with the following fields:
+                * ``fissions``: list of FissionReport instances
+                * ``fusions``: list of FusionReport instances
+        """
+        fusions: list[FusionReport] = [
+            cls._classify_bridge(c, sides_fn(c), members, cross_unit) for c in articulation_nodes
+        ]
+        ## expand {unit -> transcript} adjacency dict to {gene -> transcript}
+        units_of: dict[str, list[str]] = defaultdict(list)
+        for u in members: 
+            units_of[u[0]].append(u)
+        bridged: dict[str, tuple[str, int]] = defaultdict(list)
+        for f in fusions:
+            for g in f.split_genes: 
+                bridged[g].append(f.node)
+        ##
+        fissions: list[FissionReport] = [
+            FissionReport(g, sorted(us), sorted(bridged[g]))
+            for g, us in units_of.items() if len(us) > 1
+        ]
+        return FaultyModelReport(
+            fissions=fissions, 
+            fusions=sorted(fusions, key=lambda f: f.node),
+        )
+
     def __init__(
         self,
         ref_2bit: click.Path,
@@ -323,12 +570,17 @@ class InputProducer(CommandLineManager):
         ref_isoforms: click.Path = None,
         output: click.Path | None = None,
         prefix: str = "",
+        do_not_add_gene_suffix: bool = False,
         disable_transcript_filtering: bool = False,
         contigs: str | None = None,
         excluded_contigs: str | None = None,
+        do_not_correct_names: bool = False, ## TODO: Add the flag to toga2.py
         min_internal_exon_length: int = 0,
         min_intron_length: int = 0,
         nmd_filter_level: bool = 0,
+        disable_model_analysis: bool = False, ## TODO: Add the flag to toga2.py
+        remove_fusions: bool = False, ## TODO: Add the flag to toga2.py
+        remove_fissions: bool = False, ## TODO: Add the flag to toga2.py
         disable_intron_classification: bool = False,
         disable_cesar_profiles: bool = False,
         intronic_binary: click.Path | None = None,
@@ -355,9 +607,13 @@ class InputProducer(CommandLineManager):
         self.isoforms: click.Path | None = ref_isoforms
         self.contigs: str | None = contigs
         self.excluded_contigs: str | None = excluded_contigs
+        self.do_not_correct_names: bool = do_not_correct_names
         self.min_int_exon_length: int = min_internal_exon_length
         self.min_intron_length: int = min_intron_length
         self.nmd_level: bool = nmd_filter_level
+        self.disable_models: bool = disable_model_analysis
+        self.remove_fusions: bool = remove_fusions
+        self.remove_fissions: bool = remove_fissions
         self.annot_format: str = annot_format
         self.disable_intron_classification: bool = disable_intron_classification
         self.disable_cesar_profiles: bool = disable_cesar_profiles
@@ -367,6 +623,7 @@ class InputProducer(CommandLineManager):
             output if output is not None else hex_dir_name(DEFAULT_PREFIX)
         )
         self.strip_versions: bool = strip_versions
+        self.no_gene_suffix: bool = do_not_add_gene_suffix
         self.tmp_dir: str = os.path.join(self.output, dir_name_by_date("tmp"))
         self.keep_tmp: bool = keep_temporary
 
@@ -392,6 +649,9 @@ class InputProducer(CommandLineManager):
             self.output, add_prefix(IMMUNE_GENE_BED, prefix)
         )
         self.rejection_log: str = os.path.join(self.output, REJ_LOG)
+        self.rename_map_file: str = os.path.join(self.output, RENAME_MAP)
+        self.fission_map_file: str = os.path.join(self.output, FISSION_MAP)
+        self.fusion_map_file: str = os.path.join(self.output, FUSION_MAP)
 
         self.bed6_exons: os.PathLike = os.path.join(self.tmp_dir, EXON_BED6)
         self.fasta_for_sleasy: os.PathLike = os.path.join(self.tmp_dir, FA_FOR_SLEASY)
@@ -409,11 +669,16 @@ class InputProducer(CommandLineManager):
         self.bed2fraction_binary: str = DEFAULT_BED2FRACTION
         self.intronic_cores: int = intronic_cores
 
-        self.tr2annot: dict[str, str] = {}
-        self.rejected_transcripts: set[str] = set()
+        self.tr2annot: dict[str, Transcript] = {}
+        self.gene2trs: dict[str, list[str]] = {}
+        self.tr2gene: dict[str, str] = {}
+        self.gene2fissions: dict[str, tuple[str]] = {}
+        self.fusions: dict[str, list[list[str]]] = {}
+        self.rejection_reasons: dict[str, dict[str, list[RejEnum]]] = {
+            GENE: defaultdict(list), TRANSCRIPT: defaultdict(list)
+        }
         self.immune: set[str] = set()
-        self.rejected_lines: list[str] = []
-        self.tr2coords: dict[str, tuple[str, int, int, bool]] = {}
+        self.rename_map: dict[str, str] = {}
 
         self.run()
 
@@ -435,13 +700,20 @@ class InputProducer(CommandLineManager):
         self._to_log("Refining the reference annotation BED file")
         self.check_annotation()
         ## step 2, optional: isoform file check, potential further annotation filtering
-        if self.isoforms is not None or self.annot_format != Gxf.BED:
+        if self.isoforms is not None:
             self._to_log("Refining the input isoform file")
-            self.check_isoforms()
+            self.read_isoforms()
+            if not self.disable_models:
+                self._to_log("Checking the input annotation for gene model fission/fusion")
+                self.report_corrupted_models()
         ## write the results for steps 1 and 2
         self._to_log("Writing the annotation results")
         self.write_annotation()
+        self.write_isoforms()
         self.write_rejection_log()
+        self.write_rename_map()
+        self.write_fission_map()
+        self.write_fusion_map()
         ## step 3: exon 2bit file
         self._to_log("Creating 2bit exon sequence storage for SLEASY")
         self.create_sleasy_input()
@@ -563,12 +835,33 @@ class InputProducer(CommandLineManager):
                     f"Less than nine fields encountered in the GXF file at line {i}",
                     "warning",
                 )
+                continue
             chrom: str = data[0]
             level: str = data[2]
             strand: bool = data[6] == "+"
             attrs: dict[str, str] = parse_gxf_attrs(
                 data[8], gff3=(self.annot_format == Gxf.GFF3)
             )
+            start: int = int(data[3]) - 1  ## GXF is 1-based, BED is 0-based
+            end: int = int(data[4])
+            if level in Gxf.CHILD_TYPES:
+                parent: str = Gxf.get_exon_parent(attrs)
+                ## an orphan exon encountered; continue
+                if not parent or parent not in tr_objects:
+                    continue
+                if level == Gxf.CDS:
+                    ## add the coding exon to the transcript 
+                    ## and update coding sequence boundaries
+                    tr_objects[parent].add_cds(start, end)
+                elif level == Gxf.STOP_CODON:
+                    ## add stop codon to the sequence
+                    tr_objects[parent].add_stop(start, end)
+                else:
+                    ## add the exon to the sequence
+                    tr_objects[parent].add_exon(start, end)
+                continue
+            if level not in Gxf.CODING_TAGS and level not in Gxf.VDJ_TAGS:
+                continue
             biotype: str | None = Gxf.get_biotype(attrs)
             tr_id: str = (
                 attrs.get(Gxf.TR_ID, "")
@@ -578,86 +871,48 @@ class InputProducer(CommandLineManager):
             tr_id = Gxf.remove_tr_prefices(tr_id)
             if not tr_id:
                 continue
-            parent: str = Gxf.get_exon_parent(attrs)
-            ## check the item's  biotype
-            if (
-                biotype in Gxf.CODING_TAGS
-                or level in Gxf.CODING_TAGS
-                or level == Gxf.CDS
-            ):
-                ## messenger RNA transcript
-                is_coding: bool = True
-            elif biotype in Gxf.VDJ_TAGS:
-                ## IG fragment
-                is_coding: bool = False
-            else:
-                ## neither a protein-coding entity nor an immune gene fragment;
-                ## proceed further
-                continue
-            start: int = int(data[3]) - 1  ## GXF is 1-based, BED is 0-based
-            end: int = int(data[4])
-            # if level == Gxf.TRANSCRIPT:
-            if level in Gxf.CODING_TAGS:
-                gene: str = Gxf.get_transcript_parent(attrs)
-                tr_obj: GxfTranscript = GxfTranscript(
-                    chrom,
-                    start,
-                    end,
-                    strand,
-                    tr_id,
-                    gene,
-                    is_coding,
-                )
-                tr_objects[tr_id] = tr_obj
-                continue
-            if level not in Gxf.EXON_TYPES:
-                continue
-            parent: str = Gxf.get_exon_parent(attrs)
-            ## an orphan exon encountered; continue
-            if not parent or parent not in tr_objects:
-                continue
-            ## update transcript coding sequence boundaries
-            if level == Gxf.CDS:
-                if tr_objects[parent].cds_start is None:
-                    tr_objects[parent].cds_start = start
-                else:
-                    tr_objects[parent].cds_start = min(
-                        tr_objects[parent].cds_start, start
-                    )
-                if tr_objects[parent].cds_end is None:
-                    tr_objects[parent].cds_end = end
-                else:
-                    tr_objects[parent].cds_end = max(tr_objects[parent].cds_end, end)
-            ## add the exon to the coding sequence
-            e: int = 0
-            while e < len(tr_objects[parent].exons):
-                prev_start, prev_end = tr_objects[parent].exons[e]
-                if intersection(start, end, prev_start, prev_end) >= 0:
-                    tr_objects[parent].exons.pop(e)
-                    start, end = min(start, prev_start), max(end, prev_end)
-                    continue
-                e += 1
-            tr_objects[parent].exons.append((start, end))
-            tr_objects[parent].exons.sort(key=lambda x: (x[0], x[1]))
-            ## the outcommented block below can significantly speed the exon addition up
-            ## but it's better to assume that the user might provide an unsorted GXF file (why tho?)
-            # prev_start, prev_end = tr_objects[parent].exons.pop(-1)
-            # if intersection(start, end, prev_start, prev_end) >= 0:
-            #     tr_objects[parent].exons.append(
-            #         (min(start, prev_start), max(end, prev_end))
-            #     )
-            # else:
-            #     tr_objects[parent].exons.extend(((prev_start, prev_end), (start, end)))
+            ## check if the item is a regular gene or an immune gene fragment
+            is_coding = biotype not in Gxf.VDJ_TAGS and level not in Gxf.VDJ_TAGS
+            gene: str = Gxf.get_transcript_parent(attrs)
+            tr_obj: GxfTranscript = GxfTranscript(
+                chrom,
+                start,
+                end,
+                strand,
+                tr_id,
+                gene,
+                is_coding,
+            )
+            tr_objects[tr_id] = tr_obj
+        has_isoforms: bool = False
         with (
             open(self.provisional_bed, "w") as bed,
             open(self.provisional_isoforms, "w") as iso,
         ):
             for tr_obj in tr_objects.values():
+                if not tr_obj.exons:
+                    continue
+                thin_start: int = tr_obj.exons[0][0]
+                thin_end: int = tr_obj.exons[-1][1]
+                name: str = tr_obj.name
+                if not tr_obj.is_coding:
+                    cds_start: int = (
+                        thin_start if tr_obj.cds_start is None else tr_obj.cds_start
+                    )
+                    cds_end: int = (
+                        thin_start if tr_obj.cds_end is None else tr_obj.cds_end
+                    )
+                    self.immune.add(name)
+                else:
+                    if not tr_obj.has_cds:
+                        continue
+                    cds_start: int = tr_obj.cds_start
+                    cds_end: int = tr_obj.cds_end
                 sizes: list[str] = []
                 starts: list[str] = []
                 count: int = 0
                 for e_start, e_end in tr_obj.exons:
-                    start: str = str(e_start - tr_obj.start)
+                    start: str = str(e_start - thin_start)
                     size: str = str(e_end - e_start)
                     starts.append(start)
                     sizes.append(size)
@@ -666,26 +921,12 @@ class InputProducer(CommandLineManager):
                 starts: str = ",".join(starts) + ","
                 strand: str = "+" if tr_obj.strand else "-"
                 if self.strip_versions:
-                    tr_obj.name = self.strip_v(tr_obj.name)
+                    name = self.strip_v(tr_obj.name)
                     # tr_obj.parent = self.strip_v(tr_obj.parent)
-                name: str = f"{tr_obj.name}#{tr_obj.parent}"
-                if not tr_obj.is_coding:
-                    cds_start: int = (
-                        tr_obj.start if tr_obj.cds_start is None else tr_obj.cds_start
-                    )
-                    cds_end: int = (
-                        tr_obj.start if tr_obj.cds_end is None else tr_obj.cds_end
-                    )
-                    self.immune.add(name)
-                else:
-                    cds_start: int = tr_obj.cds_start
-                    cds_end: int = tr_obj.cds_end
-                    if cds_start is None or cds_end is None:
-                        continue
                 bed_line: str = BED_LINE.format(
                     chrom=tr_obj.chrom,
-                    start=tr_obj.start,
-                    end=tr_obj.end,
+                    start=thin_start,
+                    end=thin_end,
                     name=name,
                     strand=strand,
                     cds_start=cds_start,
@@ -695,19 +936,57 @@ class InputProducer(CommandLineManager):
                     starts=starts,
                 )
                 bed.write(bed_line)
-                iso_line: str = ISOFORM_LINE.format(gene=tr_obj.parent, tr=name)
-                iso.write(iso_line)
+                if tr_obj.parent is not None:
+                    iso_line: str = ISOFORM_LINE.format(gene=tr_obj.parent, tr=name)
+                    iso.write(iso_line)
+                    has_isoforms = True
+            if not has_isoforms:
+                self._to_log("No transcript parents found in the input GxF file", "warning")
+            else:
+                self.isoforms = self.provisional_isoforms
 
     def check_annotation(self) -> None:
         """
-        Filters reference annotation by the following criteria:
-        * All transcripts in the final annotation must be
+        Checks the transcripts in the BED file, filtering out offending items.
+
+        Filtering criteria applied are divided into 'hard' and 'soft' filters:
+
+        1. Violating 'hard' filtering criteria renders transcripts mechanically 
+        incompatible with TOGA2 annotation procedure; such transcrtipts are removed 
+        from the annotation with no option to salvage them. 'Hard' criteria include: 
+        * absence of coding sequence;
+        * shifted frame in the coding sequence;
+        * location on a deprecated chromosome (contig, scaffold, etc.);
+        * use of deprecated symbols in transcript name if ``--do_not_correct_names`` 
+        flag was set
+        2. In contrast, transcripts violating `soft` filtering criteria can be used 
+        as TOGA2 source material; however, their biological plausability is questionable. 
+        All `soft` criteria can be modified or inactivated with command line parameters. 
+        Such criteria include:
+        * transcripts with short internal (non-terminal) coding exons; 
+        these are often introduced by gene annotation software to compensate for 
+        base-level assembly error or faulty gene models;
+        * short coding sequence introns; their origin is similar to that of 
+        short internal exons;
+        * potentional nonsense-mediated decay (NMD) targets
+        In addition, soft-filtered transcripts are retained in the final annotation if 
+        their progenitor gene has no intact transcripts.
+
+        Unless the ``--do_not_correct_names`` flag is set, transcripts with illegal characters 
+        in their names get renamed via invoking ``replace_illegal_characters()``. Original names 
+        are used internally up until the point of writing the results to the output file(s).
 
         Arguments:
             None
 
         Returns:
             None
+
+        Raises:
+            Error-exits if any non-empty line:
+            * contains less than 12 fields 
+            * or has non-numeric values in coordinate fields (field 2, 3, 7, 8, 10, 11, 12)
+            * or has start coordinate greater than end coordinate
         """
         illegal_name: set[str] = set()
         rejected_contigs: set[str] = set()
@@ -743,7 +1022,10 @@ class InputProducer(CommandLineManager):
             ## remove the transcripts with improperly formatted names
             if not consistent_name(name):
                 illegal_name.add(name)
-                continue
+                if self.do_not_correct_names:
+                    continue
+                else:
+                    self.rename_map[name] = replace_illegal_characters(name)
             chrom: str = data[0]
             if self.strip_versions:
                 chrom = self.strip_v(chrom)
@@ -766,7 +1048,7 @@ class InputProducer(CommandLineManager):
             if cds_end < cds_start:
                 self._die(
                     f"Improper formatting at reference annotation file line {i}; "
-                    "coding sequence start coordinate greated than the start coordinate"
+                    "coding sequence start coordinate greater than the start coordinate"
                 )
             if cds_start == cds_end:
                 non_coding.add(name)
@@ -775,7 +1057,8 @@ class InputProducer(CommandLineManager):
             frame_length: int = 0
             sizes: list[int] = [int(x) for x in data[10].split(",") if x]
             starts: list[int] = [int(x) for x in data[11].split(",") if x]
-            flawed: bool = False
+            hard_filtered: bool = False
+            # soft_filtered: bool = False
             if self.nmd_level != IsNMD.NO and is_coding:
                 nmd_status: int = self.nmd_filter(
                     thin_start,
@@ -790,10 +1073,11 @@ class InputProducer(CommandLineManager):
                     nmd_status == IsNMD.WEAK and self.nmd_level == IsNMD.STRONG
                 ):
                     nmd_targets.add(name)
-                    flawed = True
+                    # soft_filtered = True
             has_short_exons: bool = False
             prev_end: int | None = None
             has_short_introns: bool = False
+            exons: list[tuple[int, int]] = []
             for ex, (start, size) in enumerate(zip(starts, sizes)):
                 start += thin_start
                 end: int = start + size
@@ -812,147 +1096,115 @@ class InputProducer(CommandLineManager):
                 ):
                     has_short_exons = True
                 frame_length += size
+                exons.append((max(start, cds_start), min(end, cds_end)))
                 if prev_end is not None:
                     intron_size: int = start - prev_end
                     if intron_size < self.min_intron_length:
                         has_short_introns = True
                 prev_end = end
+            if frame_length % 3:
+                out_of_frame.add(name)
+                hard_filtered = True
             if has_short_exons and is_coding:
                 short_exons.add(name)
-                flawed = True
+                # soft_filtered = True
             if has_short_introns and is_coding:
                 short_introns.add(name)
-                flawed = True
-            if frame_length % 3:  # and not self.no_frame_filter:
-                out_of_frame.add(name)
-                flawed = True
-            if flawed:
+                # soft_filtered = True
+            if hard_filtered:
                 continue
-            self.tr2annot[name] = line
-            self.tr2coords[name] = (chrom, cds_start, cds_end, strand)
+            self.tr2annot[name] = Transcript(
+                chrom, cds_start, cds_end, strand, exons, line 
+            )
 
         ## report the discarded items
-        if illegal_name:
-            log_msg: str = "\n\t".join(illegal_name)
-            self._to_log(
-                (
-                    "The following transcripts were filtered out "
-                    f"due to illegal symbols used in their names:\n\t{log_msg}"
-                ),
-                "warning",
-            )
-            self.rejected_transcripts.update(illegal_name)
-            self.rejected_lines.extend(
-                [RejectionReasons.NAME_REJ_REASON.format(x) for x in illegal_name]
-            )
-        if rejected_contigs:
-            log_msg: str = "\n\t".join(rejected_contigs)
-            self._to_log(
-                (
-                    "The following transcripts were filtered out "
-                    f"due to their location in deprecated contigs:\n\t{log_msg}"
-                ),
-                "warning",
-            )
-            self.rejected_transcripts.update(rejected_contigs)
-            self.rejected_lines.extend(
-                [RejectionReasons.CONTIG_REJ_REASON.format(x) for x in rejected_contigs]
-            )
         if non_coding:
-            log_msg: str = "\n\t".join(non_coding)
-            self._to_log(
-                (
+            self._log_item_list(
                     "The following transcripts were filtered out "
-                    f"due to absence of coding sequence:\n\t{log_msg}"
-                ),
-                "warning",
+                    "due to absence of coding sequence:",
+                non_coding,
             )
-            self.rejected_transcripts.update(non_coding)
-            self.rejected_lines.extend(
-                [RejectionReasons.NON_CODING_REJ_REASON.format(x) for x in non_coding]
-            )
-        if short_exons:
-            log_msg: str = "\n\t".join(short_exons)
-            self._to_log(
-                (
-                    "The following transcripts were filtered out because they have "
-                    f"short (<{self.min_int_exon_length} bp) internal exons: {log_msg}"
-                ),
-                "warning",
-            )
-            self.rejected_transcripts.update(short_exons)
-            self.rejected_lines.extend(
-                [RejectionReasons.SHORT_EXON_REASON.format(x) for x in short_exons]
-            )
-        if short_introns:
-            log_msg: str = "\n\t".join(short_introns)
-            self._to_log(
-                (
-                    "The following transcripts were filtered out because they have "
-                    f"short (<{self.min_intron_length} bp) CDS introns:\n\t{log_msg}"
-                ),
-                "warning",
-            )
-            self.rejected_transcripts.update(short_introns)
-            self.rejected_lines.extend(
-                [
-                    RejectionReasons.SHORT_INTRON_REASON.format(
-                        x, self.min_intron_length
-                    )
-                    for x in short_introns
-                ]
-            )
+            for i in non_coding:
+                self.rejection_reasons[TRANSCRIPT][i].append(RejEnum.NON_CODING)
         if out_of_frame:
-            log_msg: str = "\n\t".join(out_of_frame)
-            self._to_log(
-                (
+            self._log_item_list(
+                "The following transcripts were filtered out "
+                "due to shifted reading frame:",
+                out_of_frame,
+            )
+            for i in out_of_frame:
+                self.rejection_reasons[TRANSCRIPT][i].append(RejEnum.FRAME)
+        if rejected_contigs:
+            self._log_item_list(
+                "The following transcripts were filtered out "
+                "due to their location in deprecated contigs:",
+                rejected_contigs
+            )
+            for i in rejected_contigs:
+                self.rejection_reasons[TRANSCRIPT][i].append(RejEnum.CONTIG)
+        if illegal_name:
+            if self.do_not_correct_names: ##TODO: Add the flag to toga2.py
+                self._log_item_list(
                     "The following transcripts were filtered out "
-                    f"due to shifted reading frame:\n\t{log_msg}"
-                ),
-                "warning",
+                    "due to illegal symbols used in their names:",
+                    illegal_name
+                )
+                for i in illegal_name:
+                    self.rejection_reasons[TRANSCRIPT][i].append(RejEnum.NAME)
+            else:
+                self._log_item_list(
+                    "Names for the following transcripts were corrected "
+                    "due to illegal symbols found:",
+                    illegal_name,
+                )
+        if short_exons:
+            self._log_item_list(
+                f"The following transcripts contain short (<{self.min_int_exon_length} bp) "
+                "internal exons and might be filtered out:",
+                short_exons,
             )
-            self.rejected_transcripts.update(out_of_frame)
-            self.rejected_lines.extend(
-                [RejectionReasons.FRAME_REJ_REASON.format(x) for x in out_of_frame]
+            for i in short_exons:
+                self.rejection_reasons[TRANSCRIPT][i].append(RejEnum.SHORT_EXON)
+        if short_introns:
+            self._log_item_list(
+                f"The following transcripts contain short (<{self.min_intron_length} bp) "
+                "CDS introns and might be filtered out:",
+                short_introns,
             )
+            for i in short_introns:
+                self.rejection_reasons[TRANSCRIPT][i].append(RejEnum.SHORT_INTRON)
         if nmd_targets:
-            log_msg: str = "\n\t".join(nmd_targets)
-            self._to_log(
-                (
-                    "The following transcripts were filtered out "
-                    f"as potential nonsense-mediated decay targets:\n\t{log_msg}"
-                ),
-                "warning",
+            self._log_item_list(
+                "The following transcripts are potential nonsense-mediated "
+                "decay targets and might be filtered out:",
+                nmd_targets,
             )
             ## TODO: Replace `self.rejected_lines` with dict to enable fast ejection mechanism
             ## (see `check_isoforms()`)
-            self.rejected_transcripts.update(nmd_targets)
-            self.rejected_lines.extend(
-                [RejectionReasons.NMD_REASON.format(x) for x in nmd_targets]
-            )
+            for i in nmd_targets:
+                self.rejection_reasons[TRANSCRIPT][i].append(RejEnum.NMD)
         ## proceed further
 
-    def report_fusions(self) -> None:
+    def read_isoforms(self) -> None:
         """
-        Finds isoforms fusing two or more otherwise disjoint genes:
-        """
+        Reads isoform file, populating mutual mapping between genes and transcripts
 
-    def report_fissions(self) -> None:
-        """
-        Finds isoforms attributed to the same gene but not overlapping by absolute coordinates:
-        """
+        Arguments:
+            None
 
-    def check_isoforms(self) -> None:
+        Returns:
+            None
+
+        Raises:
+            Error-exists if:
+            * any of the non-empty lines in the isoform file contains less or more than 2 columns;
+            * any isoform appears more than once in the isoform file
+
+        Note:
+            Populates ``self.gene2trs`` ({gene -> [transcripts]}) and ``self.tr2gene`` 
+            ({transcript -> gene}) mapping.
+            Launches ``self.check_isoforms()`` at the end of the method
         """
-        Filters the reference isoform (gene-to-transcript) mapping file
-        by removing genes whose transcripts (isoforms) were discarded
-        at the annotation filter step.
-        In parallel, all the transcripts recorded at the annotation filter step
-        and missing gene mapping in the isoforms file are further excluded
-        from the final annotation.
-        """
-        gene2trs: dict[str, list[str]] = {}
-        trs_found: set[str] = set()
         iso_file: str = (
             self.isoforms if self.annot_format == Gxf.BED else self.provisional_isoforms
         )
@@ -968,67 +1220,69 @@ class InputProducer(CommandLineManager):
                 ## since some RefSeq genes (sadly!) contain dots in gene symbols
                 # gene, tr = map(self.strip_v, data)
                 tr = self.strip_v(tr)
-            if gene not in gene2trs:
-                gene2trs[gene] = []
-            if tr in self.rejected_transcripts:
-                continue
-            gene2trs[gene].append(tr)
-            trs_found.add(tr)
-        rejected_genes: list[str] = []
-
-        ## write the remaining isoforms to the output file
-        with (
-            open(self.filtered_isoforms, "w") as iso,
-            open(self.gene_bed, "w") as bed,
-            open(self.immune_isoforms, "w") as i_iso,
-            open(self.immune_gene_bed, "w") as i_bed,
-        ):
-            for gene, trs in gene2trs.items():
-                if not trs:
-                    rejected_genes.append(gene)
-                    continue
-                chrom: str | None = None
-                start: int | None = None
-                end: int | None = None
-                strand: bool | None = None
-                immune: bool = False
-                for tr in trs:
-                    if tr in self.immune:
-                        i_iso.write(f"{gene}\t{tr}\n")
-                        immune = True
-                    else:
-                        iso.write(f"{gene}\t{tr}\n")
-                    _chrom, _start, _end, _strand = self.tr2coords[tr]
-                    if chrom is None:
-                        chrom = _chrom
-                    elif chrom != _chrom:
-                        self._die(
-                            f"Conflicting chromosomes encountered for gene {gene}: {chrom} and {_chrom}"
-                        )
-                    if start is None:
-                        start = _start
-                    else:
-                        start = min(start, _start)
-                    if end is None:
-                        end = _end
-                    else:
-                        end = max(end, _end)
-                    if strand is None:
-                        strand = _strand
-                    else:
-                        if strand != _strand:
-                            self._die(f"Conflicting strand encountered for gene {gene}")
-                gene_bed_line: str = GENE_BED_LINE.format(
-                    chrom=chrom,
-                    start=start,
-                    end=end,
-                    name=gene,
-                    strand=("+" if strand else "-"),
+            if gene not in self.gene2trs:
+                self.gene2trs[gene] = []
+            if tr in self.tr2gene:
+                self._die(
+                    f"Isoform {tr} appears at least twice in the isoform file; "
+                    f"first duplicate found at line {i}"
                 )
-                if immune:
-                    i_bed.write(gene_bed_line)
-                else:
-                    bed.write(gene_bed_line)
+            self.gene2trs[gene].append(tr)
+            self.tr2gene[tr] = gene
+        self.check_isoforms()
+
+    def check_isoforms(self) -> None:
+        """
+        Filters the reference isoform (gene-to-transcript) mapping file
+        by removing genes for which transcripts (isoforms) were discarded
+        at any other step.
+
+        If a gene ends up with no valid transcripts, the method tries to salvage 
+        "soft-filtered" isoforms (isoforms with short internal coding exons, 
+        isoforms with short internal coding introns, and nonsense-mediated decay targets) ,
+        removing them from 
+
+        At the same time, all the transcripts recorded at the annotation filter step
+        and missing gene mapping in the isoforms file are further excluded
+        from the final annotation.
+
+        Arguments:
+            None
+
+        Returns:
+            None
+        """
+        rejected_genes: list[str] = []
+        illegal_name: list[str] = []
+        for gene, trs in list(self.gene2trs.items()):
+            if not consistent_name(gene) and not (gene in self.rename_map):
+                if self.do_not_correct_names:
+                    illegal_name.append(gene)
+                    continue
+                self.rename_map[gene] = replace_illegal_characters(gene)
+                ## internally, refer to the gene by its old name!
+                ## the corrected name will be written to the output files
+                # gene = self.rename_map[gene]
+            ## filter out the rejected isoforms 
+            ## unless removing the "soft"-filtered items 
+            ## leaves the gene without any isoforms 
+            _trs = [x for x in trs if x not in self.rejection_reasons[TRANSCRIPT]]
+            if not _trs:
+                ## if there are none, resuscitate the soft-filtered items
+                _trs = [
+                    x for x in trs if min(self.rejection_reasons[TRANSCRIPT][x]) > RejEnum.ORPHAN
+                ]
+                ## if all items were hard-filtered, discard the gene
+                if not _trs:
+                    rejected_genes.append(gene)
+                    self.gene2trs.pop(gene)
+                    continue
+                ## otherwise, retain the transcripts
+                for x in _trs:
+                    self.rejection_reasons[TRANSCRIPT].pop(x) 
+            self.gene2trs[gene] = _trs
+
+        trs_found: set[str] = {x for y in self.gene2trs.values() for x in y}
 
         ## report genes which ended up having no transcripts
         if rejected_genes:
@@ -1041,12 +1295,33 @@ class InputProducer(CommandLineManager):
                 ),
                 "warning",
             )
-            self.rejected_lines.extend(
-                [RejectionReasons.REJ_GENE.format(x) for x in rejected_genes]
-            )
+            for i in rejected_genes:
+                self.rejection_reasons[GENE][i].append(RejEnum.GENE)
+        ## report genes subject to/discarded du to illegal symbols in their names
+        if illegal_name:
+            log_msg: str = "\n\t".join(illegal_name)
+            if self.do_not_correct_names: ##TODO: Add the flag to toga2.py
+                self._to_log(
+                    (
+                        "The following genes were filtered out "
+                        f"due to illegal symbols used in their names:\n\t{log_msg}"
+                    ),
+                    "warning",
+                )
+                for i in illegal_name:
+                    self.rejection_reasons[GENE][i].append(RejEnum.NAME)
+            else:
+                self._to_log(
+                    (
+                        "Names for the following genes were corrected "
+                        f"due to illegal symbols found:\n\t{log_msg}"
+                    ),
+                    "warning",
+                )
         ## report transcripts for which genes were not found in the isoform file
         rejected_transcripts: list[str] = [
-            x for x in self.tr2annot if x not in trs_found
+            x for x in self.tr2annot if x not in trs_found and 
+            x not in self.rejection_reasons[TRANSCRIPT]
         ]
         if rejected_transcripts:
             log_msg: str = "\n\t".join(map(str, rejected_transcripts))
@@ -1058,15 +1333,122 @@ class InputProducer(CommandLineManager):
                 ),
                 "warning",
             )
-            self.rejected_lines.extend(
-                [RejectionReasons.ORPHAN_TR.format(x) for x in rejected_transcripts]
-            )
-            self.tr2annot = {
-                k: v for k, v in self.tr2annot.items() if k not in rejected_transcripts
-            }
+            for i in rejected_transcripts:
+                self.rejection_reasons[TRANSCRIPT][i].append(RejEnum.ORPHAN)
+                self.tr2gene.pop(i)
+                self.tr2annot.pop(i)
+
+    def report_corrupted_models(self) -> None:
+        """
+        Checks the input annotation for fusions and fissions
+
+        1. Fusions are defined as isoforms or genes overlapping two or more 
+        separate genes that do not overlap each other:
+        ```
+        gene1     ====g1[***]====[***]============[***]====[***]g1===
+        genes2,3  ====g2[***]====[***]g2========g3[***]====[***]g2===
+        ```
+        In strict terms, TOGA2 defines fusions as articulation nodes in the 
+        overlap graph between gene "units" of same-gene transcripts.
+        If `remove_fusion` is set to True, potential fusion genes and isoforms 
+        are removed from the final results. Otherwise, they are retained in the 
+        annotation files and listed in the output file "fusion_map.tsv".
+
+        2. Fissions are defined as genes (gene models) containing of two or more 
+        clusters of non-overlapping isoforms:
+        ```
+        isoA     [***]=====[***]=====[***]
+        isoB                                    [***]===[***]=======[***]
+        ```
+        Each subunit resulting from the gene model fission is assigned its own name 
+        derived from the progenitor gene's name with suffix added ('_A', ..., '_Z', '_AA', ...), 
+        If `remove_fissions` option set to True, split gene models are removed together with all 
+        their isoforms. Otherwise,  affected isoforms are then reassigned to their 
+        respective subunits in the output files; mapping between original name and 
+        subunit names is listed in "fission_map.tsv".
+
+        Arguments:
+            None
+
+        Returns:
+            None
+        """
+        import networkx as nx
+
+        gene_coords: dict[tuple[str, bool], list[tuple[...]]] = defaultdict(list)
+        ## sort transcripts by chromosome and strand
+        for name, tr in self.tr2annot.items():
+            if name not in self.rejection_reasons[TRANSCRIPT]:
+                gene_coords[(tr.chrom, tr.strand)].append((name, tr))
+        fusion_genes: set[str] = set()
+        fusion_isoforms: set[str] = set()
+        split_genes: list[str | tuple[str, list[str]]] = []
+        for transcripts in gene_coords.values():
+            transcripts.sort(key=lambda x: (x[1].start, x[1].end, x[0]))
+            ## get all fissions and fusions
+            report, members = self._infer_fusions_and_fissions(transcripts, nx)
+            ## process and report fusions first
+            flagged, genes = self._process_fusions(report.fusions, members)
+            fusion_isoforms |= flagged
+            fusion_genes |= genes
+            ## if fusions are requested to be removed, 
+            ## run the analysis for the second time to recover fission events
+            ## covered by fusions
+            if flagged and self.remove_fusions:
+                transcripts = [x for x in transcripts if x[0] not in flagged]
+                report, members = self._infer_fusions_and_fissions(transcripts, nx)
+            split_genes.extend(self._process_fissions(report.fissions, members))
+
+        ## log all finding
+        if split_genes:
+            if self.remove_fissions:
+                self._log_item_list(
+                    "The following fragmented gene models will be deleted, "
+                    "alongside with all their isoforms:",
+                    sorted(split_genes),
+                )
+            else:
+                self._log_item_list(
+                    "The following fragmented gene models were split into new individual genes:",
+                    sorted([x + ": " + ", ".join(self.gene2fissions[x]) for x in split_genes]),
+                )
+        if fusion_genes:
+            if self.remove_fusions:
+                self._log_item_list(
+                    "The following genes were removed from the annotation "
+                    "as potential fusions, together with all their isoforms:",
+                    sorted(fusion_genes),
+                )
+            else:
+                self._log_item_list(
+                    "The following genes were classified as potential fusions:",
+                    sorted(fusion_genes),
+                )
+        if fusion_isoforms:
+            if self.remove_fusions:
+                self._log_item_list(
+                    "The following isoforms were removed from the annotation "
+                    "as potential fusions:",
+                    sorted(fusion_isoforms)
+                )
+            else:
+                self._log_item_list(
+                    "The following isoforms were marked as potential fusions:",
+                    sorted(fusion_isoforms),
+                )
+        ## cleanup: remove faulty genes and their isoforms from the annotation
+        self.check_isoforms()
 
     def write_annotation(self) -> None:
-        """Writes the filtered reference annotation to the file"""
+        """
+        Writes the filtered reference annotation to the file
+
+        Arguments:
+            None
+
+        Returns:
+            None
+        """
         if not self.tr2annot:
             self._die("All transcripts were filtered out for various reasons")
         self._to_log(f"Writing the filtered annotation to {self.filtered_annotation}")
@@ -1074,11 +1456,85 @@ class InputProducer(CommandLineManager):
             open(self.filtered_annotation, "w") as h,
             open(self.immune_annotation, "w") as ih,
         ):
-            for name, line in self.tr2annot.items():
+            for name, tr in self.tr2annot.items():
+                if name in self.rejection_reasons[TRANSCRIPT]:
+                    continue
+                corr_name: str = self.rename_map.get(name, name)
+                if not self.no_gene_suffix:
+                    corr_name = f"{corr_name}#{self.tr2gene[name]}"
+                line: str = tr.line
+                line = line.replace(name, corr_name)
                 if name in self.immune:
                     ih.write(line + "\n")
                 else:
                     h.write(line + "\n")
+
+    def write_isoforms(self) -> None:
+        """
+        Writes the filtered isoform mapping and coordinates to the respective files
+
+        Arguments:
+            None
+
+        Returns:
+            None
+
+        Note:
+            Creates and populates four different files:
+            * ``self.filtered_isoforms``: main isoform mapping file (TSV)
+            * ``self.gene_bed``: main gene coordinates file (BED6)
+            * ``self.immune_isoforms``: immunoglobulin isoform mapping file (TSV)
+            * ``self.immune_gene_bed``: immunoglobulin gene coordinates file (BED6)
+        """
+        with (
+            open(self.filtered_isoforms, "w") as iso,
+            open(self.gene_bed, "w") as bed,
+            open(self.immune_isoforms, "w") as i_iso,
+            open(self.immune_gene_bed, "w") as i_bed,
+        ):
+            for gene, trs in self.gene2trs.items():
+                gene_name: str = self.rename_map.get(gene, gene)
+                chrom: str | None = None
+                start: int | None = None
+                end: int | None = None
+                strand: bool | None = None
+                immune: bool = False
+                for tr in trs:
+                    tr_name: str = self.rename_map.get(tr, tr)
+                    if not self.no_gene_suffix:
+                        tr_name = f"{tr_name}#{gene}"
+                    if tr in self.immune:
+                        i_iso.write(f"{gene_name}\t{tr_name}\n")
+                        immune = True
+                    else:
+                        iso.write(f"{gene_name}\t{tr_name}\n")
+                    _chrom: str = self.tr2annot[tr].chrom
+                    if chrom is None:
+                        chrom = _chrom
+                    elif chrom != _chrom:
+                        self._die(
+                            f"Conflicting chromosomes encountered for gene {gene}: {chrom} and {_chrom}"
+                        )
+                    _start: int = self.tr2annot[tr].start
+                    start = _start if start is None else min(start, _start)
+                    _end: int = self.tr2annot[tr].end
+                    end = _end if end is None else max(end, _end)
+                    _strand: bool = self.tr2annot[tr].strand
+                    if strand is None:
+                        strand = _strand
+                    elif strand != _strand:
+                            self._die(f"Conflicting strand encountered for gene {gene}")
+                gene_bed_line: str = GENE_BED_LINE.format(
+                    chrom=chrom,
+                    start=start,
+                    end=end,
+                    name=gene_name,
+                    strand=("+" if strand else "-"),
+                )
+                if immune:
+                    i_bed.write(gene_bed_line)
+                else:
+                    bed.write(gene_bed_line)
 
     def write_rejection_log(self) -> None:
         """
@@ -1090,12 +1546,92 @@ class InputProducer(CommandLineManager):
         Returns:
             None
         """
-        if not self.rejected_lines:
+        if not any(x for x in self.rejection_reasons.values()):
             return
         self._to_log(f"Writing the rejected items to {self.rejection_log}")
         with open(self.rejection_log, "w") as h:
             h.write(Headers.REJ_LOG_HEADER)
-            h.writelines(self.rejected_lines)
+            h.writelines([
+                self._build_rejection_line(name, level) 
+                for level, items in self.rejection_reasons.items()
+                for name in items
+            ])
+
+    def write_rename_map(self) -> None:
+        """
+        Writes the original_name -> corrected_name mapping to the file
+
+        Arguments:
+            None
+
+        Returns:
+            None
+        """
+        if not self.rename_map:
+            return
+        with open(self.rename_map_file, "w") as h:
+            h.writelines([f"{k}\t{v}\n" for k,v in self.rename_map.items()])
+
+    def write_fission_map(self) -> None:
+        """
+        Writes mapping between the original split gene model 
+        and the new inferred genes to the file.
+
+        The resulting file is a "wide-data" tab-separated table 
+        with original gene names in the first column and the new split 
+        in the second column
+
+        Arguments:
+            None
+
+        Returns:
+            None
+        """
+        if not self.gene2fissions:
+            return
+        with open(self.fission_map_file, "w") as h:
+            h.writelines([
+                f"{self.rename_map.get(k, k)}\t{x}\n" for k,v in self.gene2fissions.items() 
+                for x in v if x not in self.rejection_reasons[GENE]
+            ])
+
+    def write_fusion_map(self) -> None:
+        """
+        Writes all fusion isoforms and genes they bridge to the file
+
+        Arguments:
+            None
+
+        Returns:
+            None
+
+        Note:
+            * In the output table, the first column contains fusion isoforms; 
+            the column number corresponds to the number of bridged genes and 
+            might therefore differ between the lines.
+            * For each gene, all of its isoforms are listed, regardless of whether 
+            they overlap the bridging isoform
+        """
+        if not self.fusions:
+            return
+        with open(self.fusion_map_file, "w") as h:
+            for fusion in sorted(self.fusions):
+                out_line: list[str] = [fusion]
+                for fused_locus in sorted(self.fusions[fusion]):
+                    fused_locus = [x for x in fused_locus if x not in self.rejection_reasons[TRANSCRIPT]]
+                    if not fused_locus:
+                        continue
+                    fused_gene: str = self.tr2gene[fused_locus[0]]
+                    if fused_gene in self.rejection_reasons[GENE]:
+                        continue
+                    fused_locus: str = self.rename_map.get(fused_gene, fused_gene) + ":" + ",".join([x for x in fused_locus])
+                    out_line.append(fused_locus)
+                if len(out_line) < 2:
+                    continue
+                h.write("\t".join(out_line) + "\n")
+            # h.writelines(
+            #     [x + "\t" +"\t".join([",".join(z) for z in y]) + "\n" for x, y in self.fusions.items()] 
+            # )
 
     def create_sleasy_input(self) -> None:
         """
@@ -1422,15 +1958,11 @@ class InputProducer(CommandLineManager):
         equi_acc: str = os.path.join(self.profile_dir, EQUI_ACC)
         with open(equi_acc, "w") as h:
             h.write(header + "\n")
-            h.writelines([equi_line] * ACC_PROFILE_LEN)
-            # for _ in range(ACC_PROFILE_LEN):
-            #     h.write(equi_line)
+            h.writelines([equi_line + "\n"] * ACC_PROFILE_LEN)
         equi_donor: str = os.path.join(self.profile_dir, EQUI_DONOR)
         with open(equi_donor, "w") as h:
             h.write(header + "\n")
-            h.writeline([equi_line] * DONOR_PROFILE_LEN)
-            # for _ in range(DONOR_PROFILE_LEN):
-            #     h.write(equi_line)
+            h.writelines([equi_line + "\n"] * DONOR_PROFILE_LEN)
 
         ## remove temporary directory unless requested to leave
         if not self.keep_tmp:
@@ -1496,6 +2028,239 @@ class InputProducer(CommandLineManager):
             if nuc not in NUCS:
                 self._die(f"Ambiguous nucleotide encountered: {nuc}")
             self.profiles[key][pos][nuc] += 1
+
+    def _infer_fusions_and_fissions(
+        self, transcripts: list[tuple[str, Transcript]], nx: ModuleType
+    ) -> tuple[FaultyModelReport, dict[tuple[str, int], list[str]]]:
+        """
+        An auxiliary method for gene model scanning: For a given list 
+        of sorted transcripts, assess all contained gene models for 
+        model fusions and fissions.
+
+        Arguments:
+            transcripts: list, (transcript_name, Transcript) tuples sorted by span coordinates
+            nx: module, a (lazily imported) NetworkX module
+
+        Returns:
+            tuple, (FaultyModelReport, {unit: [transcripts]})
+        """
+        n: int = len(transcripts)
+        intra_graph: nx.Graph = nx.Graph()
+        intra_graph.add_nodes_from(tr for tr, _ in transcripts if tr not in self.rejection_reasons[TRANSCRIPT])
+        inter_graph: nx.Graph = nx.Graph()
+        inter_edges: list[tuple[str, str]] = []
+        rank: dict[str, int] = {name: i for i, (name, _) in enumerate(transcripts)}
+
+        ## start building the overlap graphs
+        for i, (out_name, tr_out) in enumerate(transcripts):
+            if out_name in self.rejection_reasons[TRANSCRIPT]:
+                continue
+            gene_out: str = self.tr2gene[out_name]
+            for j in range(i + 1, n):
+                in_name, tr_in = transcripts[j]
+                if in_name in self.rejection_reasons[TRANSCRIPT]:
+                    continue
+                if tr_out.end <= tr_in.start:
+                    break
+                if cds_exon_overlap(tr_out, tr_in):
+                    same_gene: bool = self.tr2gene[in_name] == gene_out
+                    if same_gene: 
+                        ## add the edge to the unit graph 
+                        ## for further unit-level analysis
+                        intra_graph.add_edge(out_name, in_name)
+                    else:
+                        ## record the edge for further unit overlap graph construction
+                        inter_edges.append((out_name, in_name))
+        ## collapse overlapping transcripts of the same gene into gene units:
+        ## each collapsed component is represented as (gene_name, counter),
+        ## where `counter` is the number of occurrences of this gene 
+        ## up to this point minus one
+        unit: dict[str, tuple[str, int]] = {} ## {transcript -> (gene, gene_counter)}
+        members: dict[tuple[str, int], list[str]] = {} ## {unit -> transcripts} mapping
+        counter: dict[str, int] = defaultdict(int) ## gene counter
+        for i_component in nx.connected_components(intra_graph):
+            gene: str = self.tr2gene[next(iter(i_component))]
+            u: tuple[str, int] = (gene, counter[gene])
+            counter[gene] += 1
+            members[u] = sorted(i_component, key=rank.__getitem__)
+            for tr in i_component:
+                unit[tr] = u
+        ## create an overlap graph between collapsed units
+        cross_unit: dict[str, set[tuple[str, int]]] = defaultdict(set)
+        for u, v in inter_edges:
+            a, b = unit[u], unit[v]
+            inter_graph.add_edge(a, b)
+            cross_unit[u].add(b)
+            cross_unit[v].add(a)
+        ## perform gene model check
+        report: FaultyModelReport = self._detect_faulty_models(
+            members, 
+            cross_unit, 
+            set(nx.articulation_points(inter_graph)),
+            partial(self._sides, adj=inter_graph)
+        )
+        return (report, members)
+
+
+    def _process_fusions(
+        self, 
+        fusions: list[FusionReport], 
+        members: dict[tuple[str, int], list[str]]
+    ) -> tuple[set[str], set[str]]:
+        """
+        Processes a list of FusionReport elements:
+        1. Collects all fusion isoforms;
+        2. Marks gene from multi-isoform gene units;
+        3. Stages genes consisting entirely of fusion isoforms, as well as 
+            individual isoforms, for rejection
+
+        Arguments:
+            fusions: list, list of FusionReport objects
+            members: dict, {unit: [transcripts]} mapping
+        
+        Returns:
+            set, a collection of isoforms scheduled for removal
+        """
+        iso, genes = set(), set()
+        for f in fusions:
+            ## ignore self-fusions
+            if f.bridge_type == BridgeType.SELF:
+                continue
+            iso.update(f.fusion_map.keys())
+            self.fusions.update(f.fusion_map)
+            ## if fusion concerns an entire unit rather than separate isoforms,
+            ## schedule the progenitor gene for rejection
+            if f.bridge_type != BridgeType.FUS_ISO:
+                genes.add(self.tr2gene[members[f.node][0]])
+        ## reject the genes consisting entirely of fusion isoforms
+        genes: set[str] = {
+            g for g in genes if g in self.gene2trs and 
+            all(t in iso for t in self.gene2trs[g] if t not in self.rejection_reasons[TRANSCRIPT])
+        }
+        if self.remove_fusions:
+            for g in genes:
+                self.rejection_reasons[GENE][g].append(RejEnum.FUSION_GENE)
+                self.gene2trs.pop(g)
+            ## reject the fusion isoforms
+            for tr in sorted(iso):
+                g: str = self.tr2gene.pop(tr)
+                if g in self.gene2trs:
+                    self.gene2trs[g].remove(tr)
+                self.rejection_reasons[TRANSCRIPT][tr].append(RejEnum.FUSION_TR)
+                self.tr2annot.pop(tr)
+        return iso, genes
+
+    def _process_fissions(
+        self, 
+        fissions: list[FissionReport], 
+        members: dict[tuple[str, int], list[str]]
+    ) -> list[str]:
+        """
+        Processes a list of FissionReport items:
+        * if fission removal was requested, schedule all units 
+        and their isoforms for deletion
+        * otherwise, assign new name to each split subunit, 
+        rewire gene->transcripts and transcript->gene mapping, 
+        and saved the mapping between new and old names  
+        to ``gene2fissions`` 
+
+        Arguments:
+            fissions: list, a collection of FissionReport items
+            members: dict, {unit: [transcripts]} mapping
+
+        Returns:
+            list, a list of potentially split gene models
+        """
+        split: list[str] = []
+        for fission in fissions:
+            split.append(fission.gene)
+            if self.remove_fissions:
+                self.rejection_reasons[GENE][fission.gene].append(RejEnum.FISSION_GENE)
+                for tr in self.gene2trs.pop(fission.gene):
+                    self.rejection_reasons[TRANSCRIPT][tr].append(RejEnum.FISSION_TR)
+                    self.tr2gene.pop(tr)
+                    self.tr2annot.pop(tr)
+                continue
+            self.gene2trs.pop(fission.gene)
+            names: list[str] = []
+            for c, u in enumerate(fission.units):
+                sub: str = f"{fission.gene}{cluster_suffix(c)}"
+                self.gene2trs[sub] = members[u]
+                for t in members[u]:
+                    self.tr2gene[t] = sub
+                names.append(sub)
+            self.gene2fissions[fission.gene] = tuple(names)
+        return split
+
+    def _build_rejection_line(self, name: str, level: str) -> str:
+        """
+        For the given item, builds a rejection log entry 
+        for each rejection reason recorded
+
+        Arguments:
+            name: str, transcript/gene name
+
+        Returns:
+            str, one or more rejection log entries
+        """
+        reasons: list[RejEnum] = self.rejection_reasons[level][name]
+        output: list[str] = []
+        for reason in reasons:
+            match reason:
+                case RejEnum.NON_CODING:
+                    output.append(RejectionReasons.NON_CODING_REJ_REASON.format(name))
+                case RejEnum.FRAME:
+                    output.append(RejectionReasons.FRAME_REJ_REASON.format(name))
+                case RejEnum.CONTIG:
+                    output.append(RejectionReasons.CONTIG_REJ_REASON.format(name))
+                case RejEnum.NAME:
+                    output.append(RejectionReasons.NAME_REJ_REASON.format(level, name))
+                case RejEnum.FISSION_GENE:
+                    output.append(RejectionReasons.FISSION.format(level, name))
+                case RejEnum.FISSION_TR:
+                    output.append(RejectionReasons.FISSION.format(level, name))
+                case RejEnum.FUSION_GENE:
+                    output.append(RejectionReasons.FUSION.format(level, name))
+                case RejEnum.FUSION_TR:
+                    output.append(RejectionReasons.FUSION.format(level, name))
+                case RejEnum.ORPHAN:
+                    output.append(RejectionReasons.ORPHAN_TR.format(name))
+                case RejEnum.SHORT_EXON:
+                    output.append(
+                        RejectionReasons.SHORT_EXON_REASON.format(name, self.min_int_exon_length)
+                    )
+                case RejEnum.SHORT_INTRON:
+                    output.append(
+                        RejectionReasons.SHORT_INTRON_REASON.format(name, self.min_intron_length)
+                    )
+                case RejEnum.NMD:
+                    output.append(RejectionReasons.NMD_REASON.format(name))
+                case RejEnum.GENE:
+                    output.append(RejectionReasons.REJ_GENE.format(name))
+        return "\n".join(output) + "\n"
+
+    def _log_item_list(self, msg: str, items: list[str]) -> None:
+        """
+        Logs items subjected to removal or otherwise flagged by the code:
+
+        Arguments:
+            msg: str, message header
+            items: list, a collection of transcripts (genes, etc.) in need of logging
+
+        Returns:
+            None
+
+        Note:
+            Logs ``items`` in the following format:
+            ```
+            msg:
+            \titem1
+            \titem2
+            ...
+            \titemN
+            ```
+        """
+        self._to_log(msg + NEWTAB + NEWTAB.join(items), "warning")
 
     def set_logging(self) -> None:
         """Sets up logging system for a InputProducer instance"""
