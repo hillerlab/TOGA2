@@ -7,7 +7,7 @@ Master script for TOGA2
 import logging
 import os
 import sys
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 import click
 
@@ -94,9 +94,13 @@ gene_select_options: PrettyGroup = PrettyGroup(
     "Query gene selection",
     help="Controls orthology/completeness classes of query projections to annotate",
 )
+filter_options: PrettyGroup = PrettyGroup(
+    "Filtering options",
+    help="Reference annotation filtering parameters",
+)
 fragm_options: PrettyGroup = PrettyGroup(
     "Fragmented projection assembly",
-    help="Controls fragmented projections assembly process"
+    help="Controls fragmented projections assembly process",
 )
 prepr_options: PrettyGroup = PrettyGroup(
     "Preprocessing",
@@ -941,10 +945,10 @@ does not end with one""",
     metavar="LOSS_SYMBOLS",
     default=",".join(Constants.DEFAULT_LOSS_SYMBOLS),
     show_default=True,
-    help="""A comma-separated list of loss status symbols; only projections of 
+    help=f"""A comma-separated list of loss status symbols; only projections of 
 respective statuses will be considered for orthology resolution. 
-Supported symbols are: %s. Keyword ALL lets all possible statuses in."""
-    % ",".join(Constants.ALL_LOSS_SYMBOLS),
+Supported symbols are: {",".join(Constants.ALL_LOSS_SYMBOLS)}. 
+Keyword ALL lets all possible statuses in."""
 )
 @orth_options.option(
     "--skip_gene_trees",
@@ -1382,7 +1386,7 @@ Settings provided this way will supersede those listed in the configuration file
 WARNING: Currenly does not accept argument short (single-dash) names""",
 )
 def from_config(
-    config_file: click.File, config_format: Optional[str], override: Optional[str]
+    config_file: click.File, config_format: str, override: str | None
 ) -> None:
     """
     \b
@@ -1407,7 +1411,7 @@ def from_config(
     from src.python.modules.toga_configured import Toga2ConfiguredLauncher
     from src.python.modules.toga_main import TogaMain
 
-    args: List[str] = Toga2ConfiguredLauncher(
+    args: list[str] = Toga2ConfiguredLauncher(
         config_file, config_format=config_format, override=override
     ).run()
     TogaMain(**args)
@@ -1421,21 +1425,22 @@ def from_config(
 @mandatory.option(
     "--ref_2bit",
     type=click.Path(exists=True),
-    metavar="REF_2BIT",
+    metavar="PATH",
     cls=DependentOption,
     required=True,
+    help="A path to the reference genome in 2bit file format",
 )
 @mandatory.option(
     "--ref_annot",
     type=click.Path(exists=True),
-    metavar="REF_ANNOTATION",
+    metavar="PATH",
     cls=DependentOption,
     required=True,
     help="""A path to the reference annotation file in BED, GTF, or GFF3 format. The default 
 expected format is BED, which can be changed with with the --annot_format flag. Note that 
 for GTF/GFF3 files, gene-to-isoform mapping is extracted from the input file, with no need for the 
 separate isoform file
-"""
+""",
 )
 @input_options.option(
     "--annot_format",
@@ -1444,22 +1449,23 @@ separate isoform file
     metavar="FORMAT",
     default=Gxf.BED,
     show_default=True,
-    help="Input annotation format. Available formats are: %s" % ", ".join(Gxf.ANNOT_FORMAT),
+    help=f"Input annotation format. Available formats are: {', '.join(Gxf.ANNOT_FORMAT)}",
 )
 @input_options.option(
     "--ref_isoforms",
     "-i",
     type=click.Path(exists=True),
-    metavar="ISOFORMS_FILE",
+    metavar="PATH",
     default=None,
     show_default=True,
     help="""A path to a two-column tab-separated file containing gene-to-isoform mapping. 
 The contents will be also checked for consistency, with transcripts missing 
 gene mapping further removed from the annotation file""",
 )
-@input_options.option(
+@filter_options.option(
     "--disable_transcript_filtering",
     "-no_filter",
+    metavar="FLAG",
     is_flag=True,
     default=False,
     show_default=True,
@@ -1467,7 +1473,7 @@ gene mapping further removed from the annotation file""",
 with no filtering. Highly discouraged unless you want to use compromised transcripts 
 for intron classificaiton/CESAR2 profile generation""",
 )
-@input_options.option(
+@filter_options.option(
     "--contigs",
     type=str,
     metavar="CONTIG_LIST",
@@ -1477,7 +1483,7 @@ for intron classificaiton/CESAR2 profile generation""",
 to restrict the fitlered annotation to. Transcripts located in other contigs 
 will be excluded from the annotation.""",
 )
-@input_options.option(
+@filter_options.option(
     "--excluded_contigs",
     type=str,
     metavar="CONTIG_LIST",
@@ -1488,7 +1494,16 @@ to exclude from the filtered annotation. Transcripts located in this contigs
 will be excluded from the annotation. Contigs appearing in both --contigs 
 and --excluded_contigs are treated as excluded.""",
 )
-@input_options.option(
+@filter_options.option(
+    "--do_not_correct_names",
+    metavar="FLAG",
+    is_flag=True,
+    default=False,
+    show_default=True,
+    help="If set, items containing illegal symbols in their names are discarded instead of being rename"
+
+)
+@filter_options.option(
     "--min_internal_exon_length",
     "-min_e",
     type=click.IntRange(min=0),
@@ -1498,7 +1513,7 @@ and --excluded_contigs are treated as excluded.""",
     help="""Minimal internal (non-terminal) coding exon length. Reference transcripts containing 
 internal exons shorter than this value are removed from the annotation."""
 )
-@input_options.option(
+@filter_options.option(
     "--min_intron_length",
     "-min_ie",
     type=int,
@@ -1507,9 +1522,9 @@ internal exons shorter than this value are removed from the annotation."""
     show_default=True,
     help="""
 Minimal allowed coding sequence intron length. Reference transcripts containing introns shorter 
-than this value are removed from the annotation"""
+than this value are removed from the annotation""",
 )
-@input_options.option(
+@filter_options.option(
     "--nmd_filter_level",
     type=click.IntRange(min=0, max=2),
     metavar="LEVEL",
@@ -1521,10 +1536,36 @@ than this value are removed from the annotation"""
 between the stop codon and the last UTR exon-exon junction is greater than 80 bases and none 
 of the following conditions hold:\n
 \t\t* the coding sequence length is shorter than 100 bases;\n
-\t\t* distance between the CDS end and the first UTR-UTR intron is more than 400 bases;\n 
+\t\t* distance between the CDS end and the first UTR-UTR intron is more than 400 bases;\n
 \t* If set to 2, the CDS-last UTR-UTR junction distance threshold is set to 55, and none of 
 the two mitigating conditions above applies\n.
 """
+)
+@filter_options.option(
+    "--disable_model_analysis",
+    metavar="FLAG",
+    is_flag=True,
+    default=False,
+    show_default=True,
+    help="If set, gene model fission/fusion analysis will not be performed",
+)
+@filter_options.option(
+    "--remove_fusions",
+    metavar="FLAG",
+    is_flag=True,
+    default=False,
+    show_default=True,
+    help="""If set, fusion isoforms/genes are removed from the final 
+annotation instead of being marked in the output""",
+)
+@filter_options.option(
+    "--remove_fissions",
+    metavar="FLAG",
+    is_flag=True,
+    default=False,
+    show_default=True,
+    help="""If set, fractured gene models and theire transcripts 
+will be removed from the final annotation, with no attempt to split the model into independent genes""",
 )
 @control_flow_options.option(
     "--disable_intron_classification",
@@ -1622,6 +1663,13 @@ will be sought for in $PATH""",
     default=None,
     show_default=True,
     help="A prefix to prepend to the output file names.",
+)
+@out_options.option(
+    "--do_not_add_gene_suffix",
+    is_flag=True,
+    default=False,
+    show_default=True,
+    help="If set, gene names are not added to transcript names after a sharp ('#') symbol",
 )
 @out_options.option(
     "--keep_temporary",
@@ -1987,12 +2035,12 @@ by combining annotation with different references""",
     metavar="ACCEPTED_LOSS_STATUSES",
     default=",".join(Constants.DEFAULT_LOSS_SYMBOLS),
     show_default=True,
-    help="""A comma-separated list of preferential loss status symbols. 
+    help=f"""A comma-separated list of preferential loss status symbols. 
 Projections corresponding to these loss statuses will have preference 
 for query gene inference and final annotation content unless no projection 
 of these statuses occurs in a query locus. 
-Supported symbols are: %s. Keyword ALL lets all possible statuses in."""
-    % ",".join(Constants.ALL_LOSS_SYMBOLS),
+Supported symbols are: {",".join(Constants.ALL_LOSS_SYMBOLS)}. 
+Keyword ALL lets all possible statuses in.""",
 )
 @integration_options.option(
     "--paralog_rel_novelty_threshold",
@@ -2267,8 +2315,7 @@ Relevant if PRANK aligner is selected""",
     default=PRANK,
     show_default=True,
     help=(
-        "Aligner program to use. Options are: %s. Case-insensitive"
-        % ",".join(ALIGNERS_TO_USE)
+        f"Aligner program to use. Options are: {','.join(ALIGNERS_TO_USE)}. Case-insensitive"
     ),
 )
 @aligner_options.option(
@@ -2567,7 +2614,6 @@ def cookbook() -> None:
     cookbook - A detailed list of TOGA2 example commands & best practices.
     WARNING: This mode is currently under development, with the list of commands being gradually expanded
     """
-    pass
 
 
 @toga2.command(
@@ -2599,7 +2645,7 @@ def cookbook() -> None:
 
 def summary(
     config: click.Path,
-    config_format: Optional[str] = "tsv",
+    config_format: str = "tsv",
 ) -> None:
     """
     \b
@@ -2626,7 +2672,7 @@ def summary(
     """
     from src.python.modules.results_checks import LogParserForSummary, SummaryStat
 
-    kwargs: Dict[str, Any] = LogParserForSummary(config, config_format).extract_settings()
+    kwargs: dict[str, Any] = LogParserForSummary(config, config_format).extract_settings()
     print(SummaryStat(**kwargs).summary())
 
 
@@ -2644,7 +2690,7 @@ def summary(
     show_default=True,
     help="A path to store the results in",
 )
-def test(output: Optional[click.Path]) -> None:
+def test(output: click.Path) -> None:
     # from src.python.modules.toga_configured import Toga2ConfiguredLauncher
     # from src.python.modules.toga_main import TogaMain
     # config_file: str = Constants.DEFAULT_CONFIG
