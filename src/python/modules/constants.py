@@ -2,7 +2,6 @@
 
 import os
 from logging import Formatter
-from typing import Dict, List, Tuple
 
 __author__ = "Yury V. Malovichko"
 __credits__ = "Bogdan M. Kirilenko"
@@ -11,10 +10,10 @@ __credits__ = "Bogdan M. Kirilenko"
 class Constants:
     LOCATION = os.path.dirname(__file__)
 
-    CONFIG_FORMATS: Tuple[str] = ("json", "tsv", "yaml")
+    CONFIG_FORMATS: tuple[str] = ("json", "tsv", "yaml")
     YAML: str = "yaml"
 
-    BINARIES_TO_CHECK: Dict[str, str] = {
+    BINARIES_TO_CHECK: dict[str, str] = {
         "bigbedtobed_binary": "bigBedToBed",
         "bedtobigbed_binary": "bedToBigBed",
         "bigwig2wig_binary": "bigWigToWig",
@@ -28,7 +27,7 @@ class Constants:
 
     RAXML_DEFAULT_NAME: str = "raxmlHPC-PTHREADS-AVX"
 
-    SPLICEAI_FILES: Tuple[str, ...] = (
+    SPLICEAI_FILES: tuple[str, ...] = (
         "spliceAiDonorPlus.bw",
         "spliceAiAcceptorPlus.bw",
         "spliceAiDonorMinus.bw",
@@ -37,7 +36,7 @@ class Constants:
 
     MEM_FILE: str = "preprocessing_report"
 
-    PROJECTION_OUTPUT: Tuple[str, ...] = (
+    PROJECTION_OUTPUT: tuple[str, ...] = (
         "query_annotation.with_discarded_exons.bed",
         "query_annotation.bed",
     )
@@ -57,7 +56,7 @@ class Constants:
     SPLICE_SITE_SHIFTS: str = "splice_site_shifts.tsv"
     TRANSCRIPT_META: str = "transcript_meta.tsv"
     UCSC_STUB: str = "query_annotation.for_browser.bed"
-    CESAR_OUT_FILES: List[str] = [
+    CESAR_OUT_FILES: list[str] = [
         "query_annotation.with_discarded_exons.bed",
         "query_annotation.bed",
         "query_annotation.for_browser.bed",
@@ -75,7 +74,7 @@ class Constants:
         "splice_site_shifts.tsv",
         "selenocysteine_codons.tsv",
     ]
-    CESAR_FILE_TO_DEST: Dict[str, str] = {
+    CESAR_FILE_TO_DEST: dict[str, str] = {
         CESAR_REJECTION_LOG: "alignment_rejection_log",
         CDS_FASTA: "cds_fasta_tmp",
         CODON_ALN: "codon_fasta",
@@ -93,7 +92,7 @@ class Constants:
         TRANSCRIPT_META: "transcript_meta",
         UCSC_STUB: "aggr_ucsc_stub",
     }
-    FINAL_UCSC_FILES: Tuple[str, ...] = (
+    FINAL_UCSC_FILES: tuple[str, ...] = (
         "{}.bb",
         "{}.ix",
         "{}.ixx",
@@ -101,7 +100,7 @@ class Constants:
     SCORE_CORRECTION_CMD: str = (
         "awk -F'\t' 'BEGIN{{OFS=\"\t\"}}{{$5=1000; print $0}}' {} > {}"
     )
-    ALL_LOSS_SYMBOLS: Tuple[str, ...] = (
+    ALL_LOSS_SYMBOLS: tuple[str, ...] = (
         "FI",
         "I",
         "PI",
@@ -112,7 +111,7 @@ class Constants:
         "PP",
         "N",
     )
-    DEFAULT_LOSS_SYMBOLS: Tuple[str, ...] = ("FI", "I", "PI", "UL")
+    DEFAULT_LOSS_SYMBOLS: tuple[str, ...] = ("FI", "I", "PI", "UL")
 
     FORMATTER: Formatter = Formatter(
         "[{asctime}][{toga_module}] - {levelname}: {message}",
@@ -137,11 +136,11 @@ class Constants:
         "ucsc_report",
     )
 
-    RESUME_ORDER: Dict[str, int] = {x: i for i, x in enumerate(RESUME_OPTIONS)}
+    RESUME_ORDER: dict[str, int] = {x: i for i, x in enumerate(RESUME_OPTIONS)}
     CESAR_AGGREGATION_RANK: int = RESUME_ORDER["aggregate_cesar_res"]
     OK_FILE: str = ".ok"
 
-    CLEANUP_TARGETS: Dict[str, Tuple[str, ...]] = {
+    CLEANUP_TARGETS: dict[str, tuple[str, ...]] = {
         "all": ("meta", "nextflow_dir", "tmp", "ucsc_dir"),
         "setup": ("meta", "nextflow_dir", "tmp", "ucsc_dir"),
         "feature_extraction": (
@@ -247,7 +246,7 @@ class Constants:
     }
 
     ## Rejection-reason-pipeline-step mapping
-    REJ2STEP: Dict[str, str] = {
+    REJ2STEP: dict[str, str] = {
         "ILLEGAL_NAME": "setup",
         "REJECTED_CONTIG": "setup",
         "NON_CODING": "setup",
@@ -282,7 +281,7 @@ class Constants:
     }
 
     ## Table file headers
-    FILE2HEADER: Dict[str, str] = {
+    FILE2HEADER: dict[str, str] = {
         "selenocysteine_codons": "SELENO_HEADER",
         "gained_intron_summary": "GAINED_INTRON_HEADER",
         "query_exon_meta": "EXON_META_HEADER",
@@ -298,13 +297,13 @@ class Constants:
         "spanning_chain_coords": "SPANNING_CHAIN_HEADER",
     }
 
-    DISCARDED_PROJECTION_FILES: Tuple[str, ...] = (
+    DISCARDED_PROJECTION_FILES: tuple[str, ...] = (
         "paralog_report",
         "processed_pseudogene_report",
         "discarded_overextended_projections",
     )
 
-    FILES_TO_GZIP: Tuple[str, ...] = (
+    FILES_TO_GZIP: tuple[str, ...] = (
         "aa_fasta",
         "cds_fasta",
         "codon_fasta",
@@ -315,17 +314,17 @@ class Constants:
         "transcript_meta",
     )
 
-    U12_FILE_COLS = 3
-    U12_AD_FIELD = {"A", "D"}
+    U12_FILE_COLS: int = 3
+    U12_AD_FIELD: tuple[str, str] = ("A", "D")
     ISOFORMS_FILE_COLS: int = 2
-    NF_DIR_NAME = "nextflow_logs"
-    NEXTFLOW = "nextflow"
+    NF_DIR_NAME: str = "nextflow_logs"
+    NEXTFLOW: str = "nextflow"
     CESAR_PUSH_INTERVAL: int = 30  # CESAR jobs push interval
     ITER_DURATION: int = 60  # CESAR jobs check interval
     UTF8: str = "utf-8"
 
     ## Nextflow configuration constants
-    NEXTFLOW_SUPPORTED_EXECS: Tuple[str, ...] = (
+    NEXTFLOW_SUPPORTED_EXECS: tuple[str, ...] = (
         "awsbatch",
         "azurebatch",
         "bridge",
@@ -344,9 +343,9 @@ class Constants:
         "sge",
         "slurm",
     )
-    ALL_PARALLEL_EXECS: Tuple[str, ...] = (*NEXTFLOW_SUPPORTED_EXECS, "para", "custom")
+    ALL_PARALLEL_EXECS: tuple[str, ...] = (*NEXTFLOW_SUPPORTED_EXECS, "para", "custom")
     NF_EXEC_SCRIPT_NAME: str = "execute_joblist.nf"
-    UNIQUE_CONFIGS: Dict[str, str] = {
+    UNIQUE_CONFIGS: dict[str, str] = {
         "preprocessing": "preprocessing.config",
         "orthology": "orthology.config",
     }
@@ -392,15 +391,15 @@ workflow {{
     SETUP: str = "set -eu; set -o pipefail;"
 
     ## projection classification features and thresholds
-    SE_MODEL_FEATURES: List[str] = ["gl_exo", "flank_cov", "exon_perc", "synt_log"]
-    ME_MODEL_FEATURES: List[str] = [
+    SE_MODEL_FEATURES: tuple[str, ...] = ("gl_exo", "flank_cov", "exon_perc", "synt_log")
+    ME_MODEL_FEATURES: tuple[str, ...] = (
         "gl_exo",
         "loc_exo",
         "flank_cov",
         "synt_log",
         "intr_perc",
-    ]
-    LD_MODEL_FEATURES: List[str] = [
+    )
+    LD_MODEL_FEATURES: tuple[str, ...] = (
         "gl_exo",
         "flank_cov",
         "exon_perc",
@@ -409,8 +408,8 @@ workflow {{
         "intr_perc",
         "score",
         "single_exon",
-    ]
-    PP_FEATURES: List[str] = ["clipped_exon_qlen", "clipped_intr_cover"]
+    )
+    PP_FEATURES: tuple[str, str] = ("clipped_exon_qlen", "clipped_intr_cover")
     PP_CLIPPED_EXON_QLEN: float = 0.3
     PP_CLIPPED_INTRON_QLEN: float = 0.1
     DEFAULT_ORTH_THRESHOLD: float = 0.5
@@ -422,7 +421,7 @@ workflow {{
     XXX_CODON = "XXX"
     GAP_CODON = "---"
     NNN_CODON = "NNN"
-    STOP_CODONS = {"TAG", "TGA", "TAA"}
+    STOP_CODONS = ("TAG", "TGA", "TAA")
 
     ACCEPTOR_SITE = ("ag",)
     DONOR_SITE = (
@@ -470,230 +469,43 @@ reporting the following warning at the {} step:\n{}
 
 ## rejection reason templates
 class RejectionReasons:
-    REJ_GENE: str = "\t".join(
-        (
-            "GENE",
-            "{}",
-            "0",
-            "No (valid) transcripts found in the reference annotation",
-            "ZERO_TRANSCRIPT_INPUT",
-            "N",
-        )
+    REJ_GENE: str = "GENE\t{}\t0\tNo (valid) transcripts found in the reference annotation\tZERO_TRANSCRIPT_INPUT\tN"
+    ORPHAN_TR: str = "TRANSCRIPT\t{}\t0\tNo corresponding gene left in the output\tZERO_GENE_INPUT\tN"
+    FISSION: str = "{}\t{}\t0\tGene model fission\tFISSION\tN"
+    FUSION: str = "{}\t{}\t0\tFusion (readthrough) gene or transcript\tFUSION\tN"
+    LENGTH_FILTER: str = "TRANSCRIPT\t{}\t0\tShorter than {} of the gene's longest isoform\tLENGTH_FILTER\tN"
+    NAME_REJ_REASON: str = "{}\t{}\t0\tIllegal character used in transcript name\tILLEGAL_NAME\tN"
+    CONTIG_REJ_REASON: str = "TRANSCRIPT\t{}\t0\tLocated outside of user-preferred contigs\tREJECTED_CONTIG\tN"
+    SHORT_EXON_REASON: str = "TRANSCRIPT\t{}\t0\tContains internal (non-terminal) exon shorter than {} bases\tSHORT_EXON\tN"
+    SHORT_INTRON_REASON: str = "TRANSCRIPT\t{}\t0\tContains short (<{} bp) coding sequence introns\tSHORT_INTRON\tN"
+    NON_CODING_REJ_REASON: str = "TRANSCRIPT\t{}\t0\tDoes not have a coding sequence\tNON_CODING\tN"
+    FRAME_REJ_REASON: str = "TRANSCRIPT\t{}\t0\tTranscript is out of frame\tOUT_OF_FRAME\tN"
+    NMD_REASON: str = "TRANSCRIPT\t{}\t0\tNonsense-mediated decay target\tNONSENSE_MEDIATED_DECAY\tN"
+    UNCOV_CHROM: str = "TRANSCRIPT\t{}\t0\tNo chain corresponds to reference chromosome\tCHROM_UNALIGNED\tM"
+    UNALIGNED_TR: str = "TRANSCRIPT\t{}\t0\tNo chain corresponds to the transcript\tTRANSCRIPT_UNALIGNED\tM"
+    UNCLASS_REJ_REASON: str = "TRANSCRIPT\t{}\t0\tNo classifiable projections found\tNO_PROJ\tM"
+    PPGENE_ONLY_REASON: str = "TRANSCRIPT\t{}\t0\tOnly processed pseudogene projections found\tPPGENE_ONLY\tM"
+    UNDERSCORED_REJ_REASON: str = "PROJECTION\t{}\t0\tChain score below set threshold ({})\tINSUFFICIENT_CHAIN_SCORE\tL"
+    LIMIT_EXCEED_REJ: str = "PROJECTION\t{}\t0\tNumber of homologous chains exceeds the set limit ({})\tCHAIN_LIMIT_EXCEEDED\tN"
+    MULTIPLE_ORTHOLOG_REJ: str = "TRANSCRIPT\t{}\t0\tMultiple orthologs detected\tMULTIPLE_ORTHOLOGY\tM"
+    NO_CHAINS_REJ: str = "TRANSCRIPT\t{}\t0\tNo covering chains detected\tNO_CHAINS\tM"
+    NO_ALIGNED_EXON_REJ: str = "PROJECTION\t{}\t0\tNo aligned exons found\tNO_EXONS_ALIGNED\t{}"
+    PREPROCESSING_REJ: str = "PROJECTION\t{}\t{}\t{}\t{}\t{}"
+    SPANNING_CHAIN_REASON: str = "PROJECTION\t{}\t0\tSpanning chain\tSPANNING\t{}"
+    ZERO_ORTHOLOGY_REJ: str = "TRANSCRIPT\t{}\t0\tNo orthologous chains detected\tZERO_ORTHOLOGY\tM"
+    CHIMERIC_ENTRY: str = "PROJECTION\t{}\t0\tPotential chimeric projection\tCHIMERIC\tN"
+    HEAVY_ENTRY: str = "PROJECTION\t{}\t0\tMaximum memory limit exceeded\tHEAVY\tN"
+    REDUNDANT_ENTRY: str = "PROJECTION\t{}\t0\tRedundant projection to the given locus\tREDUNDANT\tN"
+    REJ_ORTH_REASON: str = "PROJECTION\t{}\t0\tInsufficiently covered exons in second-best projection\tSECOND_BEST\t{}"
+    REJ_PARA_REASON: str = "PROJECTION\t{}\t0\tRedundant paralog overlapping orthologous projections\tREDUNDANT_PARALOG\t{}"
+    REJ_PPGENE_REASON: str = "PROJECTION\t{}\t0\tProcessed pseudogene overlapping ortholog or paralog\tREDUNDANT_PPGENE\t{}"
+    OUTCOMPETED_PARALOG_REASON: str = (
+        "TRANSCRIPT\t{}\t0\tAll paralogous projections outcompeted by orthologous predictions of other items\t"
+        "ALL_PARALOGS_REDUNDANT\tM"
     )
-    ORPHAN_TR: str = "\t".join(
-        (
-            "TRANSCRIPT",
-            "{}",
-            "0",
-            "No corresponding gene found in the isoform file",
-            "ZERO_GENE_INPUT",
-            "N",
-        )
-    )
-    NAME_REJ_REASON: str = "\t".join(
-        (
-            "TRANSCRIPT",
-            "{}",
-            "0",
-            "Illegal character used in transcript name",
-            "ILLEGAL_NAME",
-            "N",
-        )
-    )
-    CONTIG_REJ_REASON: str = "\t".join(
-        (
-            "TRANSCRIPT",
-            "{}",
-            "0",
-            "Located outside of user-preferred contigs",
-            "REJECTED_CONTIG",
-            "N",
-        )
-    )
-    SHORT_EXON_REASON: str ="\t".join(
-        (
-            "TRANSCRIPT", 
-            "{}", 
-            "0", 
-            "Contains internal (non-terminal) exon shorter than three bases", 
-            "SHORT_EXON",
-            "N",
-        )
-    )
-    SHORT_INTRON_REASON: str = "\t".join(
-        (
-            "TRANSCRIPT",
-            "{}",
-            "0",
-            "Contains short (<{} bp) coding sequence introns",
-            "SHORT_INTRON",
-            "N",
-        )
-    )
-    NON_CODING_REJ_REASON: str = "\t".join(
-        ("TRANSCRIPT", "{}", "0", "Does not have a coding sequence", "NON_CODING", "N")
-    )
-    FRAME_REJ_REASON: str = "\t".join(
-        ("TRANSCRIPT", "{}", "0", "Transcript is out of frame", "OUT_OF_FRAME", "N")
-    )
-    NMD_REASON: str = "\t".join(
-        ("TRANSCRIPT", "{}", "0", "Nonsense-mediated decay target", "NONSENSE_MEDIATED_DECAY", "N")
-    )
-    UNCOV_CHROM: str = "\t".join(
-        (
-            "TRANSCRIPT",
-            "{}",
-            "0",
-            "No chain corresponds to reference chromosome",
-            "CHROM_UNALIGNED",
-            "M",
-        )
-    )
-    UNALIGNED_TR: str = "\t".join(
-        (
-            "TRANSCRIPT",
-            "{}",
-            "0",
-            "No chain corresponds to the transcript",
-            "TRANSCRIPT_UNALIGNED",
-            "M",
-        )
-    )
-    UNCLASS_REJ_REASON: str = "\t".join(
-        ("TRANSCRIPT", "{}", "0", "No classifiable projections found", "NO_PROJ", "M")
-    )
-    PPGENE_ONLY_REASON: str = "\t".join(
-        ("TRANSCRIPT", "{}", "0", "Only processed pseudogene projections found", "PPGENE_ONLY", "M")
-    )
-    UNDERSCORED_REJ_REASON: str = "\t".join(
-        (
-            "PROJECTION",
-            "{}",
-            "0",
-            "Chain score below set threshold ({})",
-            "INSUFFICIENT_CHAIN_SCORE",
-            "L",
-        )
-    )
-    LIMIT_EXCEED_REJ: str = "\t".join(
-        (
-            "PROJECTION",
-            "{}",
-            "0",
-            "Number of homologous chains exceeds the set limit ({})",
-            "CHAIN_LIMIT_EXCEEDED",
-            "N",
-        )
-    )
-    MULTIPLE_ORTHOLOG_REJ: str = "\t".join(
-        (
-            "TRANSCRIPT",
-            "{}",
-            "0",
-            "Multiple orthologs detected",
-            "MULTIPLE_ORTHOLOGY",
-            "M",
-        )
-    )
-    NO_CHAINS_REJ: str = "\t".join(
-        ("TRANSCRIPT", "{}", "0", "No covering chains detected", "NO_CHAINS", "M")
-    )
-    NO_ALIGNED_EXON_REJ: str = "\t".join(
-        ("PROJECTION", "{}", "0", "No aligned exons found", "NO_EXONS_ALIGNED", "{}")
-    )
-    PREPROCESSING_REJ: str = "\t".join(("PROJECTION", "{}", "{}", "{}", "{}", "{}"))
-    SPANNING_CHAIN_REASON: str = "\t".join(
-        ("PROJECTION", "{}", "0", "Spanning chain", "SPANNING", "{}")
-    )
-    ZERO_ORTHOLOGY_REJ: str = "\t".join(
-        (
-            "TRANSCRIPT",
-            "{}",
-            "0",
-            "No orthologous chains detected",
-            "ZERO_ORTHOLOGY",
-            "M",
-        )
-    )
-    CHIMERIC_ENTRY: str = "\t".join(
-        ("PROJECTION", "{}", "0", "Potential chimeric projection", "CHIMERIC", "N")
-    )
-    HEAVY_ENTRY: str = "\t".join(
-        ("PROJECTION", "{}", "0", "Maximum memory limit exceeded", "HEAVY", "N")
-    )
-    REDUNDANT_ENTRY: str = "\t".join(
-        (
-            "PROJECTION",
-            "{}",
-            "0",
-            "Redundant projection to the given locus",
-            "REDUNDANT",
-            "N",
-        )
-    )
-    REJ_ORTH_REASON: str = "\t".join(
-        (
-            "PROJECTION",
-            "{}",
-            "0",
-            "Insufficiently covered exons in second-best projection",
-            "SECOND_BEST",
-            "{}",
-        )
-    )
-    REJ_PARA_REASON: str = "\t".join(
-        (
-            "PROJECTION",
-            "{}",
-            "0",
-            "Redundant paralog overlapping orthologous projections",
-            "REDUNDANT_PARALOG",
-            "{}",
-        )
-    )
-    REJ_PPGENE_REASON: str = "\t".join(
-        (
-            "PROJECTION",
-            "{}",
-            "0",
-            "Processed pseudogene overlapping ortholog or paralog",
-            "REDUNDANT_PPGENE",
-            "{}",
-        )
-    )
-    OUTCOMPETED_PARALOG_REASON: str = "\t".join(
-        (
-            "TRANSCRIPT",
-            "{}",
-            "0",
-            "All paralogous projections outcompeted by orthologous predictions of other items",
-            "ALL_PARALOGS_REDUNDANT",
-            "M",
-        )
-    )
-    REMOVED_ORTH_REASON: str = "\t".join(
-        (
-            "TRANSCRIPT",
-            "{}",
-            "0",
-            "No projections reached the orthology step",
-            "ALL_ORTHS_DISCARDED",
-            "{}",
-        )
-    )
-    WEAK_EDGE_REASON: str = "\t".join(
-        ("PROJECTION", "{}", "0", "Weak orthology graph edge", "WEAK_EDGE", "{}")
-    )
-    ORTH_REJ_TEMPLATE: str = "\t".join(
-        (
-            "PROJECTION",
-            "{}",
-            "0",
-            "Rejected after the gene resolution step",
-            "GENE_TREE_REJECTION",
-            "{}",
-        )
-    )
+    REMOVED_ORTH_REASON: str = "TRANSCRIPT\t{}\t0\tNo projections reached the orthology step\tALL_ORTHS_DISCARDED\t{}"
+    WEAK_EDGE_REASON: str = "PROJECTION\t{}\t0\tWeak orthology graph edge\tWEAK_EDGE\t{}"
+    ORTH_REJ_TEMPLATE: str = "PROJECTION\t{}\t0\tRejected after the gene resolution step\tGENE_TREE_REJECTION\t{}"
 
 
 class ConstColors:
@@ -709,7 +521,7 @@ class ConstColors:
 class InactMutClassesConst:
     MISS_EXON = "Missing exon"
     DEL_EXON = "Deleted exon"
-    DEL_MISS = {MISS_EXON, DEL_EXON}
+    DEL_MISS = (MISS_EXON, DEL_EXON)
     COMPENSATION = "COMPENSATION"
     SSM = "SSM"
     # (ag)acceptor-EXON-donor(gt)
@@ -724,8 +536,8 @@ class InactMutClassesConst:
     BIG_INS = "BIG_INS"
     STOP = "STOP"
 
-    STOPS = {"TAG", "TAA", "TGA"}
-    D_M = {"D", "M"}
+    STOPS = ("TAG", "TAA", "TGA")
+    D_M = ("D", "M")
     LEFT_SPLICE_CORR = ("ag",)  # acceptor
     RIGHT_SPLICE_CORR = (
         "gt",
@@ -831,41 +643,18 @@ class Headers:
     ORTHOLOGY_TABLE_HEADER: str = (
         "t_gene\tt_transcript\tq_gene\tq_transcript\torthology_class\n"
     )
-    QUERY_GENE_HEADER: str = "\t".join(("query_gene", "projection")) + "\n"
-    REJ_LOG_HEADER: str = (
-        "\t".join(
-            ("level", "item", "segment", "rejection_reason", "rej_id", "loss_status")
-        )
-        + "\n"
-    )
-    RESOLVED_LEAVES_HEADER: str = "\t".join(("reference", "query")) + "\n"
+    QUERY_GENE_HEADER: str = "query_gene\tprojection\n"
+    REJ_LOG_HEADER: str = "level\titem\tsegment\trejection_reason\trej_id\tloss_status\n"
+    RESOLVED_LEAVES_HEADER: str = "reference\tquery\n"
     SELENO_HEADER: str = (
-        "\t".join(
-            ("projection", "exon", "codon_num", "chrom", "start", "end", "query_codon")
-        )
-        + "\n"
+            "projection\texon\tcodon_num\tchrom\tstart\tend\tquery_codon\n"
     )
     SPANNING_CHAIN_HEADER: str = (
-        "\t".join(("projection", "ref_chrom", "ref_start", "ref_end")) + "\n"
+        "projection\tref_chrom\tref_start\tref_end\n"
     )
-    SPLICE_SITE_HEADER: str = (
-        "\t".join(("projection", "exon", "acceptor", "donor")) + "\n"
-    )
+    SPLICE_SITE_HEADER: str = "projection\texon\tacceptor\tdonor\n"
     SPLICE_SHIFT_HEADER: str = (
-        "\t".join(
-            (
-                "projection",
-                "exon",
-                "exon_coords",
-                "strand",
-                "site",
-                "shift",
-                "intron_type",
-                "spliceai_prob",
-                "dinucleotide",
-            )
-        )
-        + "\n"
+        "projection\texon\texon_coords\tstrand\tsite\tshift\tintron_type\tspliceai_prob\tdinucleotide\n"
     )
     TRANSCRIPT_META_HEADER: str = (
         "\t".join(
@@ -909,7 +698,7 @@ class NameTemplates:
     REF_LINKS: str = os.path.join(
         "{}", "TOGA2", "currentAnnotation", "{}.toga.links.tsv"
     )
-    CESAR_PROFILE_VALUES: Dict[str, str] = {
+    CESAR_PROFILE_VALUES: dict[str, str] = {
         "cesar_canon_u2_acceptor": "canon_U2_acceptor.tsv",
         "cesar_canon_u2_donor": "canon_U2_donor.tsv",
         "cesar_non_canon_u2_acceptor": "nonCanon_U2_acceptor.tsv",
@@ -961,7 +750,7 @@ BEST_PRACTICES: str = """\bExamples:
 
     """
 
-CONTAINER_ENGINE2BIND_KEY: Dict[str, str] = {"apptainer": "--bind", "docker": "--mount"}
+CONTAINER_ENGINE2BIND_KEY: dict[str, str] = {"apptainer": "--bind", "docker": "--mount"}
 PRE_CLEANUP_LINE: str = "rm -rf {}/*"
 IQTREE_ACCEPTED_MODELS: str = ",".join(
     (
@@ -977,7 +766,7 @@ IQTREE_ACCEPTED_MODELS: str = ",".join(
 
 PHYLO_NOT_FOUND: str = "{} was not found in PATH, with no defaults"
 
-COMPLEMENT_BASE: Dict[str, str] = {
+COMPLEMENT_BASE: dict[str, str] = {
     "A": "T",
     "T": "A",
     "G": "C",
@@ -990,7 +779,7 @@ COMPLEMENT_BASE: Dict[str, str] = {
     "n": "n",
 }
 
-GENETIC_CODE: Dict[str, str] = {
+GENETIC_CODE: dict[str, str] = {
     "TTT": "F",
     "TTC": "F",
     "TTA": "L",
@@ -1060,7 +849,7 @@ GENETIC_CODE: Dict[str, str] = {
 }
 
 ## Slots for command line managers
-TOGA2_SLOTS: Tuple[str, ...] = (
+TOGA2_SLOTS: tuple[str, ...] = (
     "ref_2bit",
     "query_2bit",
     "chain_file",
@@ -1335,7 +1124,7 @@ TOGA2_SLOTS: Tuple[str, ...] = (
     "DECOR_SCHEMA_FILE",
 )
 
-TOGA2_SLOT2ARG: Dict[str, str] = {
+TOGA2_SLOT2ARG: dict[str, str] = {
     "ref_2bit": "ref_2bit",
     "query_2bit": "query_2bit",
     "chain_file": "chain_file",
@@ -1396,8 +1185,6 @@ TOGA2_SLOT2ARG: Dict[str, str] = {
     "splice_prob_margin": "splice_prob_margin",
     "intron_gain_check": "intron_gain_check",
     "min_intron_gain_score": "intron_gain_threshold",
-    # 'min_intron_prob_gapped': 'min_intron_prob_gapped',
-    # 'min_intron_prob_ungapped': 'min_intron_prob_ungapped',
     "min_intron_prob_trusted": "min_intron_prob_trusted",
     "min_intron_prob_supported": "min_intron_prob_supported",
     "min_intron_prob_unsupported": "min_intron_prob_unsupported",
@@ -1455,4 +1242,4 @@ TOGA2_SLOT2ARG: Dict[str, str] = {
     "bindings": "bindings",
 }
 
-TOGA2_ARG2SLOT: Dict[str, str] = {v: k for k, v in TOGA2_SLOT2ARG.items()}
+TOGA2_ARG2SLOT: dict[str, str] = {v: k for k, v in TOGA2_SLOT2ARG.items()}
