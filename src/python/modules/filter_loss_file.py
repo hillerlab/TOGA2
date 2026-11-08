@@ -1,9 +1,7 @@
-#!/usr/bin/env python3
-
-""" """
+"""Filters the final loss files from discarded items"""
 
 from collections import defaultdict
-from typing import Dict, List, Optional, Set, Tuple, Union
+from typing import Final
 
 import click
 
@@ -17,12 +15,12 @@ from .shared import (
     parse_single_column,
 )
 
-HEADER: str = "level"
-PROJECTION: str = "PROJECTION"
-TRANSCRIPT: str = "TRANSCRIPT"
-GENE: str = "GENE"
-MISSING_STATS: Tuple[str, ...] = ("N", "M", "L")
-MISSING: str = "M"
+HEADER: Final[str] = "level"
+PROJECTION: Final[str] = "PROJECTION"
+TRANSCRIPT: Final[str] = "TRANSCRIPT"
+GENE: Final[str] = "GENE"
+MISSING_STATS: Final[tuple[str, ...]] = ("N", "M", "L")
+MISSING: Final[str] = "M"
 
 @click.command(context_settings=CONTEXT_SETTINGS, no_args_is_help=True)
 @click.argument(
@@ -92,78 +90,69 @@ class LossFileFilter(CommandLineManager):
     \t* FINAL_LOSS_SUMMARY is a path to the final, filtered loss summary file (`loss_summary.tsv` in TOGA2 by default)
     """
 
-    __slots__ = ("loss_in", "bed_file", "loss_out", "paralogs", "ppgenes", "isoform_file")
+    __slots__ = ("bed_file", "isoform_file", "loss_in", "loss_out", "paralogs", "ppgenes")
 
     def __init__(
         self,
         init_loss_summary: click.File,
         query_bed_file: click.File,
         final_loss_summary: click.File,
-        paralogs: Optional[click.File],
-        processed_pseudogenes: Optional[click.File],
-        isoform_file: Optional[click.Path],
-        log_name: Optional[str],
-        verbose: Optional[bool],
+        paralogs: click.File | None = None,
+        processed_pseudogenes: click.File | None = None,
+        isoform_file: click.Path | None = None,
+        log_name: str | None = None,
+        verbose: bool = False,
     ) -> None:
         self.v: bool = verbose
         self.set_logging(log_name)
         self.loss_in: click.File = init_loss_summary
         self.bed_file: click.File = query_bed_file
         self.loss_out: click.File = final_loss_summary
-        self.paralogs: Set[str] = parse_single_column(paralogs)
-        self.ppgenes: Set[str] = parse_single_column(processed_pseudogenes)
-        self.isoform_file: Union[str, None] = isoform_file
+        self.paralogs: set[str] = parse_single_column(paralogs)
+        self.ppgenes: set[str] = parse_single_column(processed_pseudogenes)
+        self.isoform_file: str | None = isoform_file
 
         self.run()
 
     def run(self) -> None:
         """Entry point"""
-        projections: Set[str] = set()
+        projections: set[str] = set()
         for i, line in enumerate(self.bed_file, start=1):
-            data: List[str] = line.strip().split("\t")
+            data: list[str] = line.strip().split("\t")
             if not data or not data[0]:
                 continue
             if len(data) != 12:
                 self._die(
-                    (
-                        "Improper final Bed file formatting at line %i; "
-                        "expected 12 fields, got %i"
-                    )
-                    % (i, len(data))
+                    f"Improper final Bed file formatting at line {i}; "
+                    f"expected 12 fields, got {len(data)}"
                 )
             name: str = base_proj_name(data[3])
             projections.add(name)
-        gene2trs: Dict[str, List[str]] = defaultdict(list)
+        gene2trs: dict[str, list[str]] = defaultdict(list)
         if self.isoform_file is not None:
             with open(self.isoform_file, "r") as h:
                 for line in h:
-                    data: List[str] = line.strip().split("\t")
+                    data: list[str] = line.strip().split("\t")
                     if not data or not data[0]:
                         continue
                     gene: str = data[0]
                     tr: str = data[1]
                     gene2trs[gene].append(tr)
-        tr2loss: Dict[str, str] = {}
-        gene2loss: Dict[str, str] = {}
-        tr2best_loss: Dict[str, str] = {}
+        tr2loss: dict[str, str] = {}
+        gene2loss: dict[str, str] = {}
+        tr2best_loss: dict[str, str] = {}
         self.loss_out.write(Headers.LOSS_FILE_HEADER)
         for i, line in enumerate(self.loss_in, start=1):
-            data: List[str] = line.strip().split("\t")
+            data: list[str] = line.strip().split("\t")
             if not data or not data[0]:
                 continue
             if len(data) != 3:
                 self._die(
-                    (
-                        "Improper loss file formatting at line %i; "
-                        "expected 3 fields, got %i"
-                    )
-                    % (i, len(data))
+                    f"Improper loss file formatting at line {i}; "
+                    f"expected 3 fields, got {len(data)}"
                 )
             if data[0] == HEADER:
                 continue
-            # if data[0] != PROJECTION:
-            #     self.loss_out.write(line)
-            #     continue
             ## filter the projection lines, leaving only the ones 
             ## corresponding to the final output list
             if data[0] == PROJECTION:
@@ -176,12 +165,15 @@ class LossFileFilter(CommandLineManager):
                 if data[1] in self.paralogs:
                     data[1] += "#paralog"
                     line = "\t".join(data) + "\n"
-                    tr2best_loss[tr] = "PG"
+                    tr2best_loss[tr] = max(
+                        (tr2best_loss.get(tr, "N"), "PG"), key=lambda x: CLASS_TO_NUM[x]
+                    )
+                    # tr2best_loss[tr] = "PG"
                 elif data[1] in self.ppgenes:
                     data[1] += "#retro"
                     line = "\t".join(data) + "\n"
                     tr2best_loss[tr] = max(
-                        (tr2best_loss.get(tr, "N"), "M"), key=lambda x: CLASS_TO_NUM[x]
+                        (tr2best_loss.get(tr, "N"), "PP"), key=lambda x: CLASS_TO_NUM[x]
                     )
                 else:
                     tr2best_loss[tr] = max(
@@ -199,6 +191,8 @@ class LossFileFilter(CommandLineManager):
             ## the transcript has any orhtologous projections reported: proceed
             if tr in tr2best_loss:
                 status: str = tr2best_loss[tr]
+                if status == "PP":
+                    status = "M"
                 tr2loss[tr] = status
                 self.loss_out.write(f"{TRANSCRIPT}\t{tr}\t{status}\n")
                 continue
@@ -211,7 +205,7 @@ class LossFileFilter(CommandLineManager):
         self._to_log("Double-checking the gene level loss classification")
         for gene, status in gene2loss.items():
             if any(x in tr2best_loss for x in gene2trs.get(gene, [])):
-                best_losses: List[Union[str, None]] = [
+                best_losses: list[str, None] = [
                     tr2best_loss.get(x) for x in gene2trs.get(gene, []) if x in tr2best_loss
                 ]
                 if best_losses:
@@ -221,15 +215,15 @@ class LossFileFilter(CommandLineManager):
             if status in MISSING_STATS:
                 self.loss_out.write(f"{GENE}\t{gene}\t{status}\n")
                 continue
-            all_trs: List[str] = gene2trs.get(gene, [])
+            all_trs: list[str] = gene2trs.get(gene, [])
             if not all_trs:
-                self._die("No transcripts found for gene %s" % gene)
-            all_statuses: List[str] = []
+                self._die(f"No transcripts found for gene {gene}")
+            all_statuses: list[str] = []
             for transcript in all_trs:
-                tr_stat: Union[str, None] = tr2loss.get(transcript)
+                tr_stat: str | None = tr2loss.get(transcript)
                 if tr_stat is None:
                     self._to_log(
-                        "No loss status recorded for transcript %s" % transcript, "warning"
+                        f"No loss status recorded for transcript {transcript}", "warning"
                     )
                     continue
                 all_statuses.append(tr_stat)
