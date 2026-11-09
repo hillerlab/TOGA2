@@ -2579,9 +2579,13 @@ class ProcessedSegment:
         prev_was_corrected: bool = self._exon_was_corrected(mut1.exon)
         if not prev_was_corrected:
             return False
-        return (mut2_start <= exon_start <= mut2_end) or (
-            mut2_start <= exon_start <= mut2_end
-        )
+        ## the boundary bordering mut1's exon is exon2's *5' (transcript-order)*
+        ## edge, i.e. the low genomic coordinate on the plus strand and the
+        ## high one on the minus strand -- not "whichever of the two edges";
+        ## checking the far/distal edge as well (as a prior fix mistakenly did)
+        ## falsely flags ordinary cross-exon mutations near that far edge
+        boundary: int = exon_start if self._exon2strand(mut2.exon) else exon_end
+        return mut2_start <= boundary <= mut2_end
 
     def _min_annot_codon(self) -> int:
         """Returns the first non-gap codon in the query"""
