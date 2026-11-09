@@ -151,7 +151,8 @@ class RejEnum(IntEnum):
     SHORT_EXON = 9
     SHORT_INTRON = 10
     NMD = 11
-    GENE = 12
+    LENGTH_FILTER = 12
+    GENE = 13
 
 
 ## Classes
@@ -191,6 +192,41 @@ class Transcript:
     strand: bool
     exons: list[tuple[int, int]]
     line: str
+
+    def cds_len(self) -> int:
+        """
+        Reports coding sequence length as the sum of all coding exons' lengths
+
+        Arguments:
+            None
+
+        Returns:
+            int, coding sequence length
+        """
+        total: int = 0
+        for e in self.exons:
+            e_start, e_end = e
+            if e_end <= self.start:
+                continue
+            if e_start >= self.end:
+                break
+            e_start = max(self.start, e_start)
+            e_end = min(self.end, e_end)
+            total += (e_end - e_start)
+        return total
+
+    def cds_span(self) -> int:
+        """
+        Returns coding sequence span as difference between CDS start 
+        and end coordinates
+
+        Arguments:
+            None
+
+        Returns:
+            int, coding sequence span
+        """
+        return self.end - self.start
 
 
 ## Functions
@@ -255,6 +291,7 @@ class InputProducer(CommandLineManager):
         'contigs',
         'disable_cesar_profiles', 
         'disable_intron_classification',
+        "disable_length_filter",
         "disable_models",
         "do_not_correct_names",
         'excluded_contigs', 
@@ -294,6 +331,7 @@ class InputProducer(CommandLineManager):
         'provisional_isoforms', 
         'rejection_log',
         "rejection_reasons",
+        "rel_thresh",
         "remove_fissions",
         "remove_fusions",
         "rename_map",
@@ -574,13 +612,15 @@ class InputProducer(CommandLineManager):
         disable_transcript_filtering: bool = False,
         contigs: str | None = None,
         excluded_contigs: str | None = None,
-        do_not_correct_names: bool = False, ## TODO: Add the flag to toga2.py
+        do_not_correct_names: bool = False,
         min_internal_exon_length: int = 0,
         min_intron_length: int = 0,
         nmd_filter_level: bool = 0,
-        disable_model_analysis: bool = False, ## TODO: Add the flag to toga2.py
-        remove_fusions: bool = False, ## TODO: Add the flag to toga2.py
-        remove_fissions: bool = False, ## TODO: Add the flag to toga2.py
+        disable_model_analysis: bool = False,
+        remove_fusions: bool = False,
+        remove_fissions: bool = False,
+        disable_length_filter: bool = False, ## TODO: Add flag to toga2.py
+        relative_length_threshold: bool = 0.8, ## TODO: Add flag to toga2.py
         disable_intron_classification: bool = False,
         disable_cesar_profiles: bool = False,
         intronic_binary: click.Path | None = None,
@@ -611,6 +651,8 @@ class InputProducer(CommandLineManager):
         self.min_int_exon_length: int = min_internal_exon_length
         self.min_intron_length: int = min_intron_length
         self.nmd_level: bool = nmd_filter_level
+        self.disable_length_filter: bool = disable_length_filter
+        self.rel_thresh: float = relative_length_threshold
         self.disable_models: bool = disable_model_analysis
         self.remove_fusions: bool = remove_fusions
         self.remove_fissions: bool = remove_fissions
@@ -706,6 +748,8 @@ class InputProducer(CommandLineManager):
             if not self.disable_models:
                 self._to_log("Checking the input annotation for gene model fission/fusion")
                 self.report_corrupted_models()
+            if not self.disable_length_filter:
+                self.isoform_length_filter()
         ## write the results for steps 1 and 2
         self._to_log("Writing the annotation results")
         self.write_annotation()
@@ -1143,7 +1187,7 @@ class InputProducer(CommandLineManager):
             for i in rejected_contigs:
                 self.rejection_reasons[TRANSCRIPT][i].append(RejEnum.CONTIG)
         if illegal_name:
-            if self.do_not_correct_names: ##TODO: Add the flag to toga2.py
+            if self.do_not_correct_names:
                 self._log_item_list(
                     "The following transcripts were filtered out "
                     "due to illegal symbols used in their names:",
@@ -1179,8 +1223,6 @@ class InputProducer(CommandLineManager):
                 "decay targets and might be filtered out:",
                 nmd_targets,
             )
-            ## TODO: Replace `self.rejected_lines` with dict to enable fast ejection mechanism
-            ## (see `check_isoforms()`)
             for i in nmd_targets:
                 self.rejection_reasons[TRANSCRIPT][i].append(RejEnum.NMD)
         ## proceed further
@@ -1300,7 +1342,7 @@ class InputProducer(CommandLineManager):
         ## report genes subject to/discarded du to illegal symbols in their names
         if illegal_name:
             log_msg: str = "\n\t".join(illegal_name)
-            if self.do_not_correct_names: ##TODO: Add the flag to toga2.py
+            if self.do_not_correct_names:
                 self._to_log(
                     (
                         "The following genes were filtered out "
@@ -1438,6 +1480,33 @@ class InputProducer(CommandLineManager):
                 )
         ## cleanup: remove faulty genes and their isoforms from the annotation
         self.check_isoforms()
+
+    def isoform_length_filter(self) -> None:
+        """
+        For each gene, applies relative isoform length fitler
+        Arguments:
+            None
+
+        Returns:
+            None
+        """
+        discarded: list[str] = []
+        for gene, trs in self.gene2trs.items():
+            tr_lengths: dict[str, int] = {tr: self.tr2annot[tr].cds_len() for tr in trs}
+            greatest_len: int = max(tr_lengths.values())
+            len_thresh: int = int(greatest_len * self.rel_thresh)
+            passed_trs: list[str] = [x for x, y in tr_lengths.items() if y >= len_thresh]
+            discarded_trs: list[str] = [x for x in trs if x not in passed_trs]
+            for tr in discarded_trs:
+                self.rejection_reasons[TRANSCRIPT][tr].append(RejEnum.LENGTH_FILTER)
+            discarded.extend(discarded_trs)
+            self.gene2trs[gene] = passed_trs
+        self._log_item_list(
+            f"The following transcripts are shorted than {self.rel_thresh} times the length "
+            "of their genes' longest isoforms and are therefore discarded", 
+            discarded,
+        )
+
 
     def write_annotation(self) -> None:
         """
@@ -2235,6 +2304,8 @@ class InputProducer(CommandLineManager):
                     )
                 case RejEnum.NMD:
                     output.append(RejectionReasons.NMD_REASON.format(name))
+                case RejEnum.LENGTH_FILTER:
+                    output.append(RejectionReasons.LENGTH_FILTER.format(name, self.rel_thresh))
                 case RejEnum.GENE:
                     output.append(RejectionReasons.REJ_GENE.format(name))
         return "\n".join(output) + "\n"

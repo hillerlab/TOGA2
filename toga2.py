@@ -1567,6 +1567,25 @@ annotation instead of being marked in the output""",
     help="""If set, fractured gene models and theire transcripts 
 will be removed from the final annotation, with no attempt to split the model into independent genes""",
 )
+@filter_options.option(
+    "--disable_length_filter",
+    metavar="FLAG",
+    is_flag=True,
+    default=False,
+    show_default=True,
+    help="If set, isoform filtering by length based on the gene's longest isoform is disabled",
+)
+@filter_options.option(
+    "--relative_length_threshold",
+    type=click.FloatRange(min=0.0, max=1.0),
+    metavar="FLOAT",
+    default=0.8,
+    show_default=True,
+    help="""Relative isoform coding sequence length threshold. For each gene, 
+isoforms with their coding sequence shorter then the longest isoform's CDS times this modifier 
+are discarded. Note that CDS length is defined as the sum of coding exons' lengths, not as 
+coding sequence span"""
+)
 @control_flow_options.option(
     "--disable_intron_classification",
     "-no_intronic",

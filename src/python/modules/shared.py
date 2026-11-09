@@ -111,8 +111,7 @@ class DependentOption(click_option_group.GroupedOption):
                 if mutex_opt in opts:
                     if current_opt:
                         raise click.UsageError(
-                            "Options %s and %s are mutually exclusive"
-                            % (self.name, mutex_opt)
+                            f"Options {self.name} and {mutex_opt} are mutually exclusive"
                         )
                     else:
                         self.prompt = None
@@ -128,8 +127,7 @@ class DependentOption(click_option_group.GroupedOption):
             for requirement in self.requires:
                 if requirement not in opts:
                     raise click.UsageError(
-                        "Option %s requires option %s, which is missing"
-                        % (self.name, requirement)
+                        f"Option {self.name} requires option {requirement}, which is missing"
                     )
         if not current_opt and not alternative_found and self.required_mutex:
             raise click.UsageError(
@@ -137,107 +135,6 @@ class DependentOption(click_option_group.GroupedOption):
                 % (self.name + ", " + ",".join(self.competes_with))
             )
         return super(DependentOption, self).handle_parse_result(ctx, opts, args)
-
-
-# class MutexOption(click_option_group.GroupedOption):
-#     """
-#     Mutually exclusive Click option class.
-#     Based on the solution from https://github.com/pallets/click/issues/257
-#     """
-
-#     def __init__(self, *args, **kwargs) -> None:
-#         if "competes_with" not in kwargs:
-#             raise click.UsageError(
-#                 "Argument \"competes_with=\" mandatory for MutexOption class "
-#                 "is missing for option %s"
-#                 % self.name
-#             )
-#         self.competes_with: List[str] = kwargs.pop("competes_with")
-#         if self.competes_with is None or not self.competes_with:
-#             raise click.UsageError(
-#                 "No competing options for an MutexOption instance %s, "
-#                 "with no defaults. Please provide a list of competing options "
-#                 'with "competes_with" argument'
-#                 % self.name
-#             )
-#         self.required_mutex: bool = (
-#             kwargs.pop("required_mutex") if "required_mutex" in kwargs else False
-#         )
-#         self.not_required_if: Union[List[str], None] = (
-#             kwargs.pop("not_required_if") if "not_required_if" in kwargs else None
-#         )
-#         kwargs["help"] = (
-#             "" if kwargs.get("help") is None else (kwargs.get("help", "") + ". ") +
-#             "Mutually exclusive with the following options: " +
-#             ", ".join(self.competes_with) +
-#             "."
-#         )
-#         super(MutexOption, self).__init__(*args, **kwargs)
-
-#     def handle_parse_result(self, ctx, opts, args) -> None:
-#         current_opt: bool = self.name in opts
-#         alternative_found: bool = False
-#         for mutex_opt in self.competes_with:
-#             if mutex_opt in opts:
-#                 if current_opt:
-#                     raise click.UsageError(
-#                         "Options %s and %s are mutually exclusive"
-#                         % (self.name, mutex_opt)
-#                     )
-#                 else:
-#                     self.prompt = None
-#                 alternative_found = True
-#         if self.not_required_if is not None:
-#             for alternative in self.not_required_if:
-#                 if alternative in opts:
-#                     self.prompt = None
-#                     alternative_found = True
-#                     break
-#         if not current_opt and not alternative_found and self.required_mutex:
-#             raise click.UsageError(
-#                 "One of the following options is required for TOGA2 execution: %s"
-#                 % (self.name + ", " + ",".join(self.competes_with))
-#             )
-#         return super(MutexOption, self).handle_parse_result(ctx, opts, args)
-
-
-# class DependentOption(click_option_group.GroupedOption):
-#     """
-#     A grouped option that requires one or more other options for the client to start.
-#     A rework of the MutexClass above.
-#     """
-#     def __init__(self, *args, **kwargs) -> None:
-#         if "requires" not in kwargs:
-#             raise click.UsageError(
-#                 "Argument \"requires=\" mandatory for DependentOption class "
-#                 "is missing for option %s"
-#                 % kwargs["name"]
-#             )
-#         self.requires: List[str] = kwargs.pop("requires")
-#         if self.requires is None or not self.requires:
-#             raise click.UsageError(
-#                 "No required options for an DependentOption instance %s, "
-#                 "with no defaults. Please provide a list of required options "
-#                 'with "requires" argument'
-#                 % kwargs["name"]
-#             )
-#         kwargs["help"] = (
-#             "" if kwargs.get("help") is None else (kwargs.get("help", "") + ". ") +
-#             "Requires the following options: " +
-#             ", ".join(self.requires) +
-#             "."
-#         )
-#         super(DependentOption, self).__init__(*args, **kwargs)
-
-#     def handle_parse_result(self, ctx, opts, args) -> None:
-#         if self.name in opts:
-#             for requirement in self.requires:
-#                 if requirement not in opts:
-#                     raise click.UsageError(
-#                         "Option %s requires option %s, which is missing"
-#                         % (self.name, requirement)
-#                     )
-#         return super(MutexOption, self).handle_parse_result(ctx, opts, args)
 
 
 class TogaDirConfig:
@@ -355,6 +252,41 @@ def aggregate(input_dir: str, output_file: str) -> None:
     Aggregate the contents of all files in the specificed directory into one file
     """
     subprocess.run(f"cat {input_dir}/* > {output_file}", shell=True)
+
+
+def cluster_suffix(index: int) -> str:
+    """
+    Returns letter suffix for unbounded cluster counts
+
+    Arguments:
+        index: int, current counter condition
+
+    Returns:
+        str, cluster suffix
+
+    Raises:
+        ValueError if index < 0
+
+    Note:
+        Expects a zero-based index
+
+    Example:
+        ```
+        a: str = cluster_suffix(0)
+        assert(a == "_A")
+
+        b: str = cluster_suffix(39)
+        assert(b == "_AN")
+        ```
+    """
+    if index < 0:
+        raise ValueError(f"Incorrect index value: {index} < 0")
+    index += 1
+    letters: str = ""
+    while index:
+        index, remainder = divmod(index - 1, 26)
+        letters = chr(ord("A") + remainder) + letters
+    return f"_{letters}"
 
 
 def parts(lst: Iterable[Any], n: int = 3):
@@ -550,7 +482,15 @@ def make_cds_track(line):
 
 
 def get_connected_components(graph: nx.Graph) -> list[nx.Graph]:
-    """ """
+    """
+    Legacy version of connected component inference from an undirected graph
+
+    Arguments:
+        graph: NetworkX Graph object
+
+    Returns:
+        list, a list of connected components as NetworkX Graph objects
+    """
     ## check the NetworkX version
     nx_v: str = nx.__version__
     v_split: list[str] = [x for x in nx_v.split(".") if x.isnumeric()]
@@ -633,10 +573,10 @@ def parse_one_column(file: str | TextIO) -> list[str]:
     Parse single-column file into a string list. Simple as.
     """
     if isinstance(file, str):
-        return list(map(lambda x: x.strip("\n\r\t"), file.readlines()))
+        return [x.strip("\n\r\t") for x in file.readlines()]
     else:
         with open(file, "r") as h:
-            return list(map(lambda x: x.strip("\n\r\t"), h.readlines()))
+            return [x.strip("\n\r\t") for x in file.readlines()]
 
 
 def read_tab(file: str, sep: str = "\t") -> Iterable[str]:
@@ -698,7 +638,6 @@ class Lock:
         self.filehandle: TextIO | None = None
 
     def __enter__(self) -> TextIO:
-        print(self.lockfile, self.retry, self.timeout)
         # is_available: bool = not is_locked(self.lockfile) ## check if lockfile exists
         # print(f'{is_available = }')
         fh: TextIO = os.open(self.lockfile, os.O_RDWR | os.O_CREAT)
@@ -807,12 +746,12 @@ class CommandLineManager:
         """Report a line to standard error stream regardless of verbosity settings"""
         sys.stderr.write(msg + "\n")
 
-    def _exit(self, msg: str = None) -> None:
+    def _exit(self, msg: str | None = None) -> None:
         """Safe exit witn zero return code and a given message"""
         self._to_log(msg) if msg is not None else None
         sys.exit(0)
 
-    def _die(self, msg: str = None) -> None:
+    def _die(self, msg: str | None = None) -> None:
         """Error-exit with a given message"""
         if msg is not None:
             self._to_log(msg, "critical")
