@@ -1508,7 +1508,7 @@ and --excluded_contigs are treated as excluded.""",
     "-min_e",
     type=click.IntRange(min=0),
     metavar="INT",
-    default=0,
+    default=3,
     show_default=True,
     help="""Minimal internal (non-terminal) coding exon length. Reference transcripts containing 
 internal exons shorter than this value are removed from the annotation."""
@@ -1518,7 +1518,7 @@ internal exons shorter than this value are removed from the annotation."""
     "-min_ie",
     type=int,
     metavar="INT",
-    default=0,
+    default=30,
     show_default=True,
     help="""
 Minimal allowed coding sequence intron length. Reference transcripts containing introns shorter 
