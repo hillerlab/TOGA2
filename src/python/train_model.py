@@ -1,7 +1,8 @@
+#!/usr/bin/env python3
+
 """Script to train XGBoost models."""
 
 import os
-from typing import Optional
 
 import click
 import joblib
@@ -85,13 +86,13 @@ class ModelTrainer(CommandLineManager):
     Also note that training metaparameters are hardcoded for the sake of reproducibility.
     """
 
-    __slots__ = ("df_def", "df_ld", "se_path", "me_path", "ld_path")
+    __slots__ = ("df_def", "df_ld", "ld_path", "me_path", "se_path")
 
     def __init__(
         self,
-        default_dataset: Optional[click.Path],
-        long_distance_dataset: Optional[click.Path],
-        output: Optional[click.Path],
+        default_dataset: click.Path,
+        long_distance_dataset: click.Path,
+        output: click.Path,
     ) -> None:
         """Entry point"""
         self.v: bool = True
@@ -124,7 +125,7 @@ class ModelTrainer(CommandLineManager):
 
         ## get predictors and target for single-exon model
         X_se: pd.core.frame.DataFrame = df_se.copy()
-        X_se = X_se[Constants.SE_MODEL_FEATURES]
+        X_se = X_se[list(Constants.SE_MODEL_FEATURES)]
         y_se: pd.core.series.Series = df_se["y"]
         ## and train the respective model
         self._to_log("Training default model for single exon transcripts")
@@ -134,7 +135,7 @@ class ModelTrainer(CommandLineManager):
 
         ## rinse and repeat for multi-exon transcripts
         X_me: pd.core.frame.DataFrame = df_me.copy()
-        X_me = X_me[Constants.ME_MODEL_FEATURES]
+        X_me = X_me[list(Constants.ME_MODEL_FEATURES)]
         y_me: pd.core.series.Series = df_me["y"]
         self._to_log("Training default model for multi-exon transcripts")
         self._train(
@@ -181,19 +182,16 @@ class ModelTrainer(CommandLineManager):
         results = cross_val_score(model, x, y, cv=kfold)
         model.fit(x, y)
         y_lst = list(y)
-        self._to_log("Summary for %s model: " % name)
-        self._to_log("Number of training samples: %i" % len(x))
-        self._to_log("Features used: %s" % ",".join(x.columns))
+        self._to_log(f"Summary for {name} model: ")
+        self._to_log(f"Number of training samples: {len(x)}")
+        self._to_log(f"Features used: {','.join(x.columns)}")
         self._to_log(
-            "#positives: %i; #negatives: %i" % (y_lst.count(1), y_lst.count(0))
+            f"#positives: {y_lst.count(1)}; #negatives: {y_lst.count(0)}"
         )
         self._to_log(
-            "Accuracy: {0:.3f} {1:.3f}".format(
-                results.mean() * 100, results.std() * 100
-            )
-        )
+            f"Accuracy: {results.mean() * 100:.3f} {results.std() * 100:.3f}")
         joblib.dump(model, save_to)  # save the model
-        self._to_log("Model saved to: %s" % save_to)
+        self._to_log(f"Model saved to: {save_to}")
 
 
 if __name__ == "__main__":
