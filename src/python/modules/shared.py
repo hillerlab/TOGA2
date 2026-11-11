@@ -1,50 +1,38 @@
-#!/usr/bin/env python3
-
 """
 Shared functionality across the scripts
 """
 
 import ctypes
 import fcntl
+import gzip
 import logging
 import os
 import subprocess
 import sys
 import time
+from collections.abc import Callable, Iterable
 from datetime import datetime
 from logging import Formatter
 from shutil import copy2, move, rmtree
-from typing import (
-    Any,
-    Callable,
-    Dict,
-    Iterable,
-    List,
-    Optional,
-    Set,
-    TextIO,
-    Tuple,
-    Union,
-)
+from typing import Any, Final, TextIO
 
 import click
 import click_option_group
-import gzip
 import networkx as nx
 from click_option_group import OptionGroup
 
 ## Constants
-CONTEXT_SETTINGS: Dict[str, Any] = {
+CONTEXT_SETTINGS: Final[dict[str, Any]] = {
     "help_option_names": ["-h", "-help", "--help"],
     "ignore_unknown_options": True,
     "allow_extra_args": True,
     "max_content_width": 150,
 }
 ## borrowed from splitFile
-SPLIT_JOB_HEADER: Tuple[str, str, str] = ("#!/bin/bash", "set -eu", "set -o pipefail")
+SPLIT_JOB_HEADER: Final[tuple[str, str, str]] = ("#!/bin/bash", "set -eu", "set -o pipefail")
 SLIB_NAME = "chain_bst_lib.so"
 UTF8: str = "utf-8"
-FORMATTER: Formatter = Formatter(
+FORMATTER: Final[Formatter] = Formatter(
     # "[{asctime}][{filename}] - {levelname}: {message}",
     "[{asctime}][{toga_module}] - {levelname}: {message}",
     style="{",
@@ -52,7 +40,7 @@ FORMATTER: Formatter = Formatter(
 )
 
 ## Sequence handling & score calculation data
-COMPLEMENT: Dict[str, str] = {
+COMPLEMENT: Final[dict[str, str]] = {
     "A": "T",
     "T": "A",
     "G": "C",
@@ -65,14 +53,14 @@ COMPLEMENT: Dict[str, str] = {
     "n": "n",
     "-": "-",
 }
+ALLOWED_CHARSET: Final[tuple[int, ...]] = (
+    35, *range(45, 59), *range(65, 91), 95, *range(97, 123), 124
+)
 
 ## Types
-Numeric = Union[float, int]
-
-
 class PrettyGroup(OptionGroup):
-    def get_help_record(self, ctx: click.Context) -> Optional[Tuple[str, str]]:
-        init_help: Union[Tuple[str, str], None] = super().get_help_record(ctx)
+    def get_help_record(self, ctx: click.Context) -> tuple[str, str] | None:
+        init_help: tuple[str, str] | None = super().get_help_record(ctx)
         if init_help is None:
             return None
         return "\n" + init_help[0], init_help[1]
@@ -86,12 +74,12 @@ class DependentOption(click_option_group.GroupedOption):
 
     def __init__(self, *args, **kwargs) -> None:
         ## mutex functionality: deprecate the joint use of mutually exclusive options
-        self.competes_with: Union[List[str], None] = kwargs.pop("competes_with", None)
+        self.competes_with: list[str] | None = kwargs.pop("competes_with", None)
         self.required_mutex: bool = kwargs.pop("required_mutex", False)
         ## dependence functionality: enforce the use of the option in tandem with its dependencies
-        self.requires: Union[List[str], None] = kwargs.pop("requires", None)
+        self.requires: list[str] | None = kwargs.pop("requires", None)
         ## 'soft dependence' functionality: enforce the use of the option unless alternative is provided
-        self.not_required_if: Union[List[str], None] = kwargs.pop(
+        self.not_required_if: list[str] | None = kwargs.pop(
             "not_required_if", None
         )
         # if kwargs["help"] and self.competes_with is not None:
@@ -123,8 +111,7 @@ class DependentOption(click_option_group.GroupedOption):
                 if mutex_opt in opts:
                     if current_opt:
                         raise click.UsageError(
-                            "Options %s and %s are mutually exclusive"
-                            % (self.name, mutex_opt)
+                            f"Options {self.name} and {mutex_opt} are mutually exclusive"
                         )
                     else:
                         self.prompt = None
@@ -140,8 +127,7 @@ class DependentOption(click_option_group.GroupedOption):
             for requirement in self.requires:
                 if requirement not in opts:
                     raise click.UsageError(
-                        "Option %s requires option %s, which is missing"
-                        % (self.name, requirement)
+                        f"Option {self.name} requires option {requirement}, which is missing"
                     )
         if not current_opt and not alternative_found and self.required_mutex:
             raise click.UsageError(
@@ -151,154 +137,35 @@ class DependentOption(click_option_group.GroupedOption):
         return super(DependentOption, self).handle_parse_result(ctx, opts, args)
 
 
-# class MutexOption(click_option_group.GroupedOption):
-#     """
-#     Mutually exclusive Click option class.
-#     Based on the solution from https://github.com/pallets/click/issues/257
-#     """
-
-#     def __init__(self, *args, **kwargs) -> None:
-#         if "competes_with" not in kwargs:
-#             raise click.UsageError(
-#                 "Argument \"competes_with=\" mandatory for MutexOption class "
-#                 "is missing for option %s"
-#                 % self.name
-#             )
-#         self.competes_with: List[str] = kwargs.pop("competes_with")
-#         if self.competes_with is None or not self.competes_with:
-#             raise click.UsageError(
-#                 "No competing options for an MutexOption instance %s, "
-#                 "with no defaults. Please provide a list of competing options "
-#                 'with "competes_with" argument'
-#                 % self.name
-#             )
-#         self.required_mutex: bool = (
-#             kwargs.pop("required_mutex") if "required_mutex" in kwargs else False
-#         )
-#         self.not_required_if: Union[List[str], None] = (
-#             kwargs.pop("not_required_if") if "not_required_if" in kwargs else None
-#         )
-#         kwargs["help"] = (
-#             "" if kwargs.get("help") is None else (kwargs.get("help", "") + ". ") +
-#             "Mutually exclusive with the following options: " +
-#             ", ".join(self.competes_with) +
-#             "."
-#         )
-#         super(MutexOption, self).__init__(*args, **kwargs)
-
-#     def handle_parse_result(self, ctx, opts, args) -> None:
-#         current_opt: bool = self.name in opts
-#         alternative_found: bool = False
-#         for mutex_opt in self.competes_with:
-#             if mutex_opt in opts:
-#                 if current_opt:
-#                     raise click.UsageError(
-#                         "Options %s and %s are mutually exclusive"
-#                         % (self.name, mutex_opt)
-#                     )
-#                 else:
-#                     self.prompt = None
-#                 alternative_found = True
-#         if self.not_required_if is not None:
-#             for alternative in self.not_required_if:
-#                 if alternative in opts:
-#                     self.prompt = None
-#                     alternative_found = True
-#                     break
-#         if not current_opt and not alternative_found and self.required_mutex:
-#             raise click.UsageError(
-#                 "One of the following options is required for TOGA2 execution: %s"
-#                 % (self.name + ", " + ",".join(self.competes_with))
-#             )
-#         return super(MutexOption, self).handle_parse_result(ctx, opts, args)
-
-
-# class DependentOption(click_option_group.GroupedOption):
-#     """
-#     A grouped option that requires one or more other options for the client to start.
-#     A rework of the MutexClass above.
-#     """
-#     def __init__(self, *args, **kwargs) -> None:
-#         if "requires" not in kwargs:
-#             raise click.UsageError(
-#                 "Argument \"requires=\" mandatory for DependentOption class "
-#                 "is missing for option %s"
-#                 % kwargs["name"]
-#             )
-#         self.requires: List[str] = kwargs.pop("requires")
-#         if self.requires is None or not self.requires:
-#             raise click.UsageError(
-#                 "No required options for an DependentOption instance %s, "
-#                 "with no defaults. Please provide a list of required options "
-#                 'with "requires" argument'
-#                 % kwargs["name"]
-#             )
-#         kwargs["help"] = (
-#             "" if kwargs.get("help") is None else (kwargs.get("help", "") + ". ") +
-#             "Requires the following options: " +
-#             ", ".join(self.requires) +
-#             "."
-#         )
-#         super(DependentOption, self).__init__(*args, **kwargs)
-
-#     def handle_parse_result(self, ctx, opts, args) -> None:
-#         if self.name in opts:
-#             for requirement in self.requires:
-#                 if requirement not in opts:
-#                     raise click.UsageError(
-#                         "Option %s requires option %s, which is missing"
-#                         % (self.name, requirement)
-#                     )
-#         return super(MutexOption, self).handle_parse_result(ctx, opts, args)
-
-
 class TogaDirConfig:
-    ## NOTE: Slots are currently deprecated due to Postoga using vars() when logging starting args
-    ## TO be changed after the respective change is pushed to Postoga
-    # __slots__ = (
-    #     "togadir",
-    #     "orthology_class",
-    #     "loss_status",
-    #     "orthology_score",
-    #     "to",
-    #     "bed_type",
-    #     "min_paralog_score",
-    #     "with_isoforms",
-    #     "extract",
-    #     "outdir",
-    #     "only_table",
-    #     "only_convert",
-    #     "log_level",
-    #     "depure",
-    # )
 
     def __init__(
         self,
         togadir: os.PathLike,
-        by_loss_status: Optional[Union[str, None]] = None,
-        by_orthology_class: Optional[Union[str, None]] = None,
-        by_orthology_score: Optional[Union[float, None]] = None,
-        to: Optional[str] = "bed",
-        target: Optional[str] = "utr",
-        by_paralog_score: Optional[Union[float, None]] = None,
-        with_isoforms: Optional[Union[os.PathLike, None]] = None,
-        extract: Optional[Union[bool, str]] = False,
-        outdir: Optional[Union[os.PathLike, None]] = None,
-        only_table: Optional[bool] = True,
-        only_convert: Optional[bool] = False,
-        level: Optional[str] = "warning",
-        depure: Optional[bool] = True,
+        by_loss_status: str | None = None,
+        by_orthology_class: str | None = None,
+        by_orthology_score: float | None = None,
+        to: str = "bed",
+        target: str = "utr",
+        by_paralog_score: float | None = None,
+        with_isoforms: os.PathLike | None = None,
+        extract: bool | str = False,
+        outdir: os.PathLike | None = None,
+        only_table: bool = True,
+        only_convert: bool = False,
+        level: str = "warning",
+        depure: bool = True,
     ) -> None:
         self.togadir: os.PathLike = togadir
-        self.loss_status: Union[str, None] = by_loss_status
-        self.orthology_class: Union[str, None] = by_orthology_class
-        self.orthology_score: Union[float, None] = by_orthology_score
+        self.loss_status: str | None = by_loss_status
+        self.orthology_class: str | None = by_orthology_class
+        self.orthology_score: float | None = by_orthology_score
         self.to: str = to
         self.bed_type: str = target
-        self.min_paralog_score: Union[float, None] = by_paralog_score
-        self.with_isoforms: Union[os.PathLike, None] = with_isoforms
-        self.extract: Union[bool, str] = extract
-        self.outdir: Union[os.PathLike, None] = outdir
+        self.min_paralog_score: float | None = by_paralog_score
+        self.with_isoforms: os.PathLike | None = with_isoforms
+        self.extract: bool | str = extract
+        self.outdir: os.PathLike | None = outdir
         self.only_table: bool = only_table
         self.only_convert: bool = only_convert
         self.log_level: str = level
@@ -306,6 +173,40 @@ class TogaDirConfig:
 
 
 ## Executables
+def consistent_name(name: str) -> bool:
+    """
+    Checks whether only the allowed symbols are used in the transcript name
+
+    Arguments:
+        name: str, input transcript/gene name
+
+    Returns:
+        bool, indication whether the name contains approved symbols only
+    """
+    return all(ord(x) in ALLOWED_CHARSET for x in name)
+
+
+def replace_illegal_characters(name: str) -> str:
+    """
+    Modifies the sequence name by replacing all illegal symbols to 
+    uppercase English alphabet. The substitution logic is reproducible 
+    but degenerate (i.e, multiple ASCII symbols map to the same letter)
+
+    Arguments:
+        name: str, sequence name
+
+    Returns:
+        str, a modified name
+    """
+    output: list[str] = []
+    for ch in name:
+        if ord(ch) in ALLOWED_CHARSET:
+            output.append(ch)
+        else:
+            output.append(chr(ord('A') + ord(ch) % 26))
+    return "".join(output)
+
+
 def timestamp() -> str:
     """Returns the current date- and timestamp"""
     return datetime.now().strftime("%H:%M_%d.%m.%y")
@@ -353,6 +254,41 @@ def aggregate(input_dir: str, output_file: str) -> None:
     subprocess.run(f"cat {input_dir}/* > {output_file}", shell=True)
 
 
+def cluster_suffix(index: int) -> str:
+    """
+    Returns letter suffix for unbounded cluster counts
+
+    Arguments:
+        index: int, current counter condition
+
+    Returns:
+        str, cluster suffix
+
+    Raises:
+        ValueError if index < 0
+
+    Note:
+        Expects a zero-based index
+
+    Example:
+        ```
+        a: str = cluster_suffix(0)
+        assert(a == "_A")
+
+        b: str = cluster_suffix(39)
+        assert(b == "_AN")
+        ```
+    """
+    if index < 0:
+        raise ValueError(f"Incorrect index value: {index} < 0")
+    index += 1
+    letters: str = ""
+    while index:
+        index, remainder = divmod(index - 1, 26)
+        letters = chr(ord("A") + remainder) + letters
+    return f"_{letters}"
+
+
 def parts(lst: Iterable[Any], n: int = 3):
     """Split an iterable into parts with size n."""
     return [lst[i : i + n] for i in iter(range(0, len(lst), n))]
@@ -368,15 +304,15 @@ def segment_base(projection: str) -> str:
     return projection.split("$")[0]
 
 
-def get_proj2trans(projection: str) -> Tuple[str, str]:
+def get_proj2trans(projection: str) -> tuple[str, str]:
     """Safely extract transcript name from the chain projection name"""
-    data: List[str] = projection.split("$")[0].split("#")
+    data: list[str] = projection.split("$")[0].split("#")
     if data[-1] == "retro" or data[-1] == "paralog":
         data = data[:-1]
     return "#".join(data[:-1]), data[-1]
 
 
-def safe_div(dividend: Union[float, int], divisor: Union[float, int]) -> float:
+def safe_div(dividend: float, divisor: float) -> float:
     """Divides dividend by divisor, return zero if divisor equals zero"""
     if not divisor:
         return 0.0
@@ -407,12 +343,21 @@ def safe_make_dir(dir: str) -> None:
     os.makedirs(dir) if not os.path.isdir(dir) else None
 
 
-def intersection(start1: int, end1: int, start2: int, end2: int) -> int:
+def intersection(s1: int, e1: int, s2: int, e2: int) -> int:
     """
-    Returns intersection length between two segments with coordinates
-    (start1, end1) and (start2, end2); values smaller than one indicate no intersection
+    Assesses intersection size between the two intervals:
+    
+    Arguments:
+        * s1: int, start of the first interval
+        * s2: int, start of the second interval
+        * e1: int, end of the first interval
+        * e2: int, end of the first interval
+
+    Returns:
+        int, size of the intersection. Negative value indicates lack of intersection,
+        zero value indicates that the items are adjacent one to another
     """
-    return min(end1, end2) - max(start1, start2)
+    return min(e1, e2) - max(s1, s2)
 
 
 def chain_extract_id(index_file, chain_id, chain_file=None):
@@ -495,17 +440,15 @@ def make_cds_track(line):
         blockEnd = block_abs_ends[block_num]
 
         # skip the block if it is entirely UTR
-        if blockEnd <= thick_start:
-            continue
-        elif blockStart >= thick_end:
+        if blockEnd <= thick_start or blockStart >= thick_end:
             continue
 
         # if we are here: this is not an entirely UTR exon
         # it might intersect the CDS border or to be in the CDS entirely
         # remove UTRs: block start must be >= CDS_start (thick_start)
         # block end must be <= CDS_end (thick_end)
-        block_new_start = blockStart if blockStart >= thick_start else thick_start
-        block_new_end = blockEnd if blockEnd <= thick_end else thick_end
+        block_new_start = max(blockStart, thick_start)
+        block_new_end = min(blockEnd, thick_end)
         # save blocks with updated coordinates
         # also convert them back to relative coordinates with - thick_start
         # after the update thick_start/End are equal to chrom_start/End
@@ -538,11 +481,19 @@ def make_cds_track(line):
     return new_line
 
 
-def get_connected_components(graph: nx.Graph) -> List[nx.Graph]:
-    """ """
+def get_connected_components(graph: nx.Graph) -> list[nx.Graph]:
+    """
+    Legacy version of connected component inference from an undirected graph
+
+    Arguments:
+        graph: NetworkX Graph object
+
+    Returns:
+        list, a list of connected components as NetworkX Graph objects
+    """
     ## check the NetworkX version
     nx_v: str = nx.__version__
-    v_split: List[str] = [x for x in nx_v.split(".") if x.isnumeric()]
+    v_split: list[str] = [x for x in nx_v.split(".") if x.isnumeric()]
     if len(v_split) > 1:
         NX_VERSION: float = float(f"{v_split[0]}.{v_split[1]}")
     else:
@@ -554,11 +505,17 @@ def get_connected_components(graph: nx.Graph) -> List[nx.Graph]:
     return raw_components
 
 
-def parse_single_column(file: TextIO) -> Set[str]:
+def parse_single_column(file: TextIO) -> set[str]:
     """
-    Parse single-column file into a string list. Simple as.
+    Parse single-column file into a string set. Simple as.
+
+    Arguments:
+        file: file handle to the input file
+
+    Returns:
+        set, collection of file lines
     """
-    output: Set[str] = set()
+    output: set[str] = set()
     if file is None:
         return output
     for line in file:
@@ -569,13 +526,13 @@ def parse_single_column(file: TextIO) -> Set[str]:
     return output
 
 
-def parse_fasta(file: str) -> Dict[str, str]:
+def parse_fasta(file: str) -> dict[str, str]:
     """
     A simple FASTA parser.
     Input is the file content.
     Input is a dictionary with sequence names as keys and aligned sequences as values.
     """
-    output: Dict[str, str] = dict()
+    output: dict[str, str] = {}
     key, seq, is_entry = "", "", False
     for line in file.split("\n"):
         if not line:
@@ -594,11 +551,11 @@ def parse_fasta(file: str) -> Dict[str, str]:
     return output
 
 
-def parse_score_file(filter_file: TextIO, score_column: int) -> Dict[str, Numeric]:
-    out_dict: Dict[str, Numeric] = {}
-    for line in filter_file.readlines():
+def parse_score_file(filter_file: TextIO, score_column: int) -> dict[str, float]:
+    out_dict: dict[str, float] = {}
+    for line in filter_file():
         line: str = line.strip()
-        line_data: List[str] = line.split("\t")
+        line_data: list[str] = line.split("\t")
         if len(line_data) < 2:
             continue
         exon_name: str = line_data[0]
@@ -611,33 +568,33 @@ def parse_score_file(filter_file: TextIO, score_column: int) -> Dict[str, Numeri
     return out_dict
 
 
-def parse_one_column(file: Union[str, TextIO]) -> List[str]:
+def parse_one_column(file: str | TextIO) -> list[str]:
     """
     Parse single-column file into a string list. Simple as.
     """
     if isinstance(file, str):
-        return list(map(lambda x: x.strip("\n\r\t"), file.readlines()))
+        return [x.strip("\n\r\t") for x in file.readlines()]
     else:
         with open(file, "r") as h:
-            return list(map(lambda x: x.strip("\n\r\t"), h.readlines()))
+            return [x.strip("\n\r\t") for x in file.readlines()]
 
 
 def read_tab(file: str, sep: str = "\t") -> Iterable[str]:
     """Read a TSV file line by line, yield a generator of field-split lines"""
     if type(file) is str:
-        gzipped: bool = file.endswith(".gz") or file.endswith("gzip")
+        gzipped: bool = file.endswith((".gz", "gzip"))
         opener: Callable[str] = gzip.open if gzipped else open
         with opener(file, "r") as h:
             for line in h:
                 if gzipped:
                     line = line.decode("utf8")
-                data: List[str] = line.strip().split(sep)
+                data: list[str] = line.strip().split(sep)
                 if not data or not data[0]:
                     continue
                 yield data
     else:
         for line in file:
-            data: List[str] = line.strip().split(sep)
+            data: list[str] = line.strip().split(sep)
             if not data or not data[0]:
                 continue
             yield data
@@ -655,7 +612,7 @@ def is_locked(file: str) -> bool:
     try:
         with open(file, "a"):
             pass
-    except IOError:
+    except OSError:
         return True
 
     dummy: str = file + ".dummy"
@@ -663,7 +620,7 @@ def is_locked(file: str) -> bool:
         copy2(file, dummy)
         os.remove(dummy)
         return False
-    except WindowsError:
+    except OSError:
         return True
 
 
@@ -678,10 +635,9 @@ class Lock:
         self.lockfile: str = lockfile
         self.retry: float = retry
         self.timeout: float = timeout
-        self.filehandle: Union[TextIO, None] = None
+        self.filehandle: TextIO | None = None
 
     def __enter__(self) -> TextIO:
-        print(self.lockfile, self.retry, self.timeout)
         # is_available: bool = not is_locked(self.lockfile) ## check if lockfile exists
         # print(f'{is_available = }')
         fh: TextIO = os.open(self.lockfile, os.O_RDWR | os.O_CREAT)
@@ -696,7 +652,7 @@ class Lock:
                 fcntl.flock(fh, fcntl.LOCK_EX | fcntl.LOCK_NB)
                 is_available = True
                 break
-            except (IOError, OSError):
+            except OSError:
                 print("Lock not acquired; waiting")
                 time.sleep(self.retry)  ## sleep the expected amount of time
                 curr_time = time.time()
@@ -717,13 +673,13 @@ class Lock:
 
 
 class CommandLineManager:
-    __slots__ = ("v", "debug", "logger")
+    __slots__ = ("debug", "logger", "v",)
     """
     A minimal functionality class to be decorated with Click functionality and
     further extended to suit particular scripts' needs
     """
 
-    def set_logging(self, name: str = __name__, toga_module: str = None) -> None:
+    def set_logging(self, name: str = __name__, toga_module: str | None = None) -> None:
         """
         Sets up logging system for a TogaMain instance
         """
@@ -754,7 +710,7 @@ class CommandLineManager:
             self.logger.addHandler(console_handler)
         self.logger = logging.LoggerAdapter(self.logger, {"toga_module": toga_module})
 
-    def _to_log(self, msg: str, level: Optional[str] = "info") -> None:
+    def _to_log(self, msg: str, level: str = "info") -> None:
         """Logs a message at a given level
 
         Args:
@@ -790,12 +746,12 @@ class CommandLineManager:
         """Report a line to standard error stream regardless of verbosity settings"""
         sys.stderr.write(msg + "\n")
 
-    def _exit(self, msg: str = None) -> None:
+    def _exit(self, msg: str | None = None) -> None:
         """Safe exit witn zero return code and a given message"""
         self._to_log(msg) if msg is not None else None
         sys.exit(0)
 
-    def _die(self, msg: str = None) -> None:
+    def _die(self, msg: str | None = None) -> None:
         """Error-exit with a given message"""
         if msg is not None:
             self._to_log(msg, "critical")
@@ -807,8 +763,7 @@ class CommandLineManager:
             copy2(from_, to_)
         except Exception as e:
             self._die(
-                ("Unexpected behavior when trying to copy from %s to %s: \n")
-                % (from_, to_)
+                f"Unexpected behavior when trying to copy from {from_} to {to_}: \n"
                 + e
             )
 
@@ -829,7 +784,7 @@ class CommandLineManager:
         except FileNotFoundError:
             pass
         except Exception:
-            self._die("Unexpected behavior observed while trying to remove %s" % f)
+            self._die(f"Unexpected behavior observed while trying to remove {f}")
 
     def _rmdir(self, d: os.PathLike) -> None:
         """Recursive directory deletion method"""
@@ -843,7 +798,7 @@ class CommandLineManager:
         except FileNotFoundError:
             pass
         except Exception:
-            self._die("Unexpected behavior observed while trying to remove %s" % d)
+            self._die(f"Unexpected behavior observed while trying to remove {d}")
 
     def _mv(self, file: os.PathLike, dest: os.PathLike) -> None:
         """Moves a file or directory to a new location"""
@@ -857,9 +812,9 @@ class CommandLineManager:
 
     def _exec(
         self,
-        cmd: Union[str, List[str]],
+        cmd: str | list[str],
         err_msg: str,
-        input_: bytes = None,
+        input_: bytes | None = None,
         die: bool = True,
         shun_verbosity: bool = True,
         gather_stdout: bool = True,

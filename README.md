@@ -38,12 +38,12 @@
 ---
 
 ## Changelog
-### v2.0.10
-* `run` mode:
-    * Deprecated use of fragments on the same chromosome for fragmented projection assembly. The legacy behavior can be enable with the `--enable_same_contigs` flag. 
-* `integrate` mode:
-    * Fixed gene disjointing problem leading to paralogs and lost orthologous overlapping functional orthologs form independent gene units;
-    * Iterative novelty filter for paralogous and lost projections to minimize the number of added projections;
+### v2.0.11
+* `prepare-input` mode:
+    * **Transcript/gene renaming**: Genes/transcripts with illegal symbols are renamed to comply with the TOGA2 naming notation rather than being outright discarded. Mapping between original and corrected names is saved to `rename_map.tsv`. Legacy functionality can be restored with the `--do_not_correct_names` flag.
+    * **Adaptive transcript filter**: Filtering criteria are now separated into "hard" (non-coding genes, shifted reading frame) and "soft" (short internal exons, short coding introns, nonsense-mediated decay signatures). "Soft" criteria cannot result in discarding an entire gene: if a gene has no intact isoforms, its soft-filtered isoforms are retained in the final annotation.
+    * **Gene model fission handling**: If a gene consists of two or more clusters of non-overlapping isoforms, TOGA2 assigns each cluster a new gene name and rewires gene-transcript mapping. Split genes can be removed completely from final output with the `--remove_fissions` flag. Information on fragmented genes and the new genes' names can be found in the `fission_map.tsv` output file.
+    * **Fusion transcript filter**: Transcripts/genes bridging two or more non-overlapping genes are marked as potential fusions (readthroughs) and recorded in the `fusion_map.tsv` file. Fusions can be removed from the output annotation by setting `--remove_fusions` flag.
 
 For the full list of code changes, see [changelog.md](https://github.com/hillerlab/TOGA2/blob/main/assets/changelog/changelog.md) .
 

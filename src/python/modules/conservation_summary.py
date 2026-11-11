@@ -1,18 +1,22 @@
-#!/usr/bin/env python3
-
 """
 Summarises projection classification data based on TOGA results
 """
 
 from collections import defaultdict
 from sys import stdout
-from typing import Dict, List, Optional, Set, TextIO, Tuple, Union
+from typing import Final, TextIO
 
 import click
 
 from .cesar_wrapper_constants import CLASS_TO_NUM
 from .constants import Headers, RejectionReasons
-from .shared import CONTEXT_SETTINGS, base_proj_name, parse_single_column
+from .shared import (
+    CONTEXT_SETTINGS,
+    CommandLineManager,
+    base_proj_name,
+    parse_single_column,
+    read_tab,
+)
 
 __author__ = "Yury V. Malovichko"
 __year__ = "2024"
@@ -20,325 +24,26 @@ __email__ = "yury.malovichko@senckenberg.de"
 __credits__ = ("Bogdan Kirilenko", "Michael Hiller", "Virag Sharma", "David Jebb")
 
 ## define local constants
-PROJECTION: str = "PROJECTION"
-TRANSCRIPT: str = "TRANSCRIPT"
-GENE: str = "GENE"
-CESAR_STEP_REJECT: str = "No exons were aligned"
-NO_EXONS: str = "NO_EXONS_FOUND"
-LOW_COV: str = "INSUFFICIENT_SEQ_COVERAGE"
-REDUNDANT_PARALOG: str = "REDUNDANT_PARALOG"
-REDUNDANT_PPGENE: str = "REDUNDANT_PPGENE"
-SECOND_BEST: str = "SECOND_BEST"
-IGNORED_ITEMS: Tuple[str] = ("REDUNDANT_PARALOG", "REDUNDANT_PPGENE", "SECOND_BEST")
-SPANNING_CLASSES: str = ("L", "M", "N")
-PG: str = "PG"
-
-def parse_precedence_file(file: TextIO) -> Dict[str, str]:
-    """ """
-    tr2curr_best: Dict[str, Tuple[str, int, int, str]] = {}
-    for line in file:
-        data: List[str] = line.rstrip().split("\t")
-        if not data or not data[0]:
-            continue
-        if data[0] == "projection":
-            continue
-        proj: str = data[0]
-        tr: str = "#".join(proj.split("#")[:-1])
-        # chrom: str = data[1]
-        start: int = int(data[2])
-        end: int = int(data[3])
-        if tr not in tr2curr_best:
-            tr2curr_best[tr] = (proj, start, end)
-        else:
-            prev_best_start, prev_best_end = tr2curr_best[tr][1:]
-            # if start >= prev_best_start and end <= prev_best_end:
-            if end - start < prev_best_end - prev_best_start:
-                tr2curr_best[tr] = (proj, start, end)
-    tr2best: Dict[str, str] = {k: v[0] for k, v in tr2curr_best.items()}
-    return tr2best
-
-
-def transcript_meta_to_report(
-    file: Union[str, TextIO],
-    precedence: Optional[Dict[str, str]] = {},
-    paralogs: Optional[Set[str]] = set(),
-    ppgenes: Optional[Set[str]] = set(),
-    discarded_paralogs: Optional[Set[str]] = set(),
-) -> Tuple[Dict[str, str], Dict[str, str]]:
-    """
-    Parses transcript_meta.tsv output file of TOGA, inferring projection
-    classification and best transcript classification
-    """
-    proj2status: Dict[str, str] = {}
-    tr2status: Dict[str, Set[str]] = defaultdict(set)
-    potentially_missing_paralogs: Set[str] = set()
-    confirmed_missing_paralogs: Set[str] = set()
-    if not isinstance(file, str):
-        lines: List[str] = file.readlines()
-    else:
-        with open(file, "r") as h:
-            lines: List[str] = h.readlines()
-    has_ppgenes: Set[str] = set()
-    ## extract the projection loss statuses
-    for line in lines:
-        data: List[str] = line.strip().split("\t")
-        if data[0] == "projection":
-            continue
-        proj: str = data[0]
-        basename: str = base_proj_name(proj)
-        tr: str = "#".join(proj.split("#")[:-1])
-        status: str = data[1]
-        proj2status[proj] = status
-        ## do not propagate paralog and ppgene loss status to downstream levels
-        if proj in ppgenes or basename in ppgenes:
-            tr2status[tr].add("N")
-            has_ppgenes.add(tr)
-            continue
-        ## for paralogs, do not count the discarded projections towards the transcript classification
-        if proj in paralogs:
-            if proj in discarded_paralogs or basename in discarded_paralogs:
-                potentially_missing_paralogs.add(tr)
-                continue
-            status = "PG"
-        tr2status[tr].add(status)
-    ## for paralog-only transcripts, assign the Missing status to those
-    ## that have all their projections discarded
-    for tr in potentially_missing_paralogs:
-        if tr in tr2status:
-            continue
-        tr2status[tr] = "M"
-        confirmed_missing_paralogs.add(tr)
-    ## infer the transcript level loss statuses and add them to output
-    for tr, all_classes in tr2status.items():
-        max_status: str = max(all_classes, key=lambda x: CLASS_TO_NUM[x])
-        ## if transcript has an established precedence order (e.g., nested spanning chains),
-        ## use the top projection's status as the transcript's status estimate
-        if tr in precedence and max_status in SPANNING_CLASSES:
-            ## TODO: The max_status check above is a safeguard for rare quirks
-            ## when both spanning and regular orthologous projections are encountered;
-            ## will be likely redundant in 2.1
-            preferred_proj: str = precedence[tr]
-            basename: str = base_proj_name(preferred_proj)
-            if preferred_proj in proj2status and (
-                preferred_proj not in ppgenes and basename not in ppgenes
-            ):
-                preferred_loss_status: str = proj2status[preferred_proj]
-                tr2status[tr] = preferred_loss_status
-                continue
-        ## if a transcript does not have any projections except for ppgenes, treat it as missing
-        if max_status == "N" and tr in has_ppgenes:
-            max_status = "M"
-        tr2status[tr] = max_status
-
-    return (proj2status, tr2status, confirmed_missing_paralogs)
-
-
-# def rejection_file_to_report( ## LEGACY FORMAT
-#     file: Union[str, TextIO]
-# ) -> Tuple[Dict[str, str], Dict[str, str]]:
-#     """
-#     Parses the genes_rejection_reason.tsv file containing transcripts which were
-#     rejected for one reason or another at the CESAR alignment step or upstream
-#     """
-#     ## TODOS:
-#     ## 1) Solicit the current classification scheme with Michael
-#     ##    (I suspect summing the number of exons or their lengths is better than
-#     ##     summing the number of exon groups at the last classificaiton step)
-#     ## 2) Double-check that all the reasons have been
-#     proj2status: Dict[str, str] = {}
-#     tr2status: Dict[str, str] = {}
-#     if not isinstance(file, str):
-#         lines: List[str] = file.readlines()
-#     else:
-#         with open(file, 'r') as h:
-#             lines: List[str] = h.readlines()
-#     for line in lines:
-#         data: List[str] = line.strip().split('\t')
-#         proj: str = data[0]
-#         tr: str = '.'.join(proj.split('.')[:-1])
-#         ## if projection was rejected prior to the CESAR step, it's marked as missing
-#         if data[2] != CESAR_STEP_REJECT:
-#             proj2status[proj] = 'M'
-#             tr2status[proj] = 'M'
-#             continue
-#         reasons: List[str] = [tuple(x.split(':')) for x in data[3].split(';')]
-#         ## projections for which no exons were reliably located by alignment
-#         ## results are most likely lost
-#         if any(map(lambda x: x[0] == NO_EXONS, reasons)):
-#             proj2status[proj] = 'L'
-#             tr2status[tr] = 'L'
-#             continue
-#         ## projections dismissed at alignment step due to insufficient fraction
-#         ## of exons properly located by alignment data are (likely) missing
-#         if any(map(lambda x: x[0] == LOW_COV, reasons)):
-#             proj2status[proj] = 'M'
-#             tr2status[tr] = 'M'
-#             continue
-#         ## other reasons come in two flavours: if assembly gaps were encountered
-#         ## within the search space, the rejection label has the '+GAP' suffix
-#         aln_gap_num: int = sum((int(x[1]) for x in reasons if '+GAP' in x[0]))
-#         no_gap_num: int = sum((int(x[1]) for x in reasons if '+GAP' not in x[0]))
-#         ## now, if the number of gap-containing groups ouweighs the counterpart,
-#         ## mark the projection as missing unless there's already a more defined
-#         if aln_gap_num > no_gap_num:
-#             proj2status[proj] = 'M' if proj not in proj2status else proj2status[proj]
-#             tr2status[tr] = 'M'
-#         else:
-#             proj2status[proj] = 'L'
-#             tr2status[tr] = 'L'
-#
-#     return (proj2status, tr2status)
-
-
-def rejection_file_to_report(
-    file: Union[str, TextIO],
-) -> Tuple[Dict[str, str], Dict[str, str]]:
-    """
-    Parses the rejection_reasons.tsv file containing transcripts which were
-    rejected for one reason or another at the CESAR alignment step or upstream
-    """
-    proj2status: Dict[str, str] = {}
-    tr2all_statuses: Dict[str, Set[str]] = defaultdict(set)
-    tr2status: Dict[str, str] = {}
-    if not isinstance(file, str):
-        lines: List[str] = file.readlines()
-    else:
-        with open(file, "r") as h:
-            lines: List[str] = h.readlines()
-    for line in lines:
-        data: List[str] = line.rstrip().split("\t")
-        if not data or not data[0]:
-            continue
-        if data[0] == "level":
-            continue
-        if len(data) == 2:  ## TEMPORARY SOLUTION TO BYPASS THE UPSTREAM BUG
-            name: str = data[0]
-            status: str = "N"
-            tr2status[name] = status
-            continue
-        level: str = data[0]
-        name: str = data[1]
-        status: str = data[5]
-        if level == TRANSCRIPT:
-            tr2status[name] = status
-            continue
-        if level != PROJECTION:
-            raise ValueError(f"An ambiguous entry found: {line}")
-        tr: str = "#".join(name.split("#")[:-1])
-        reason: str = data[4]
-        if reason in IGNORED_ITEMS:
-            continue
-        proj2status[name] = status
-        tr2all_statuses[tr].add(status)
-    for tr in tr2all_statuses:
-        if tr in tr2status:
-            continue
-        all_classes: Set[str] = tr2all_statuses[tr]
-        max_status: str = max(all_classes, key=lambda x: CLASS_TO_NUM[x])
-        tr2status[tr] = max_status
-
-    return (proj2status, tr2status)
-
-
-def add_rejection_data(
-    orig_proj2status: Dict[str, str],
-    orig_tr2status: Dict[str, str],
-    reject_proj2status: Dict[str, str],
-    reject_tr2status: Dict[str, str],
-    precedence: Optional[Dict[str, str]] = {},
-    paralogs: Optional[Set[str]] = set(),
-    ppgenes: Optional[Set[str]] = set(),
-) -> Tuple[Dict[str, str], Dict[str, str]]:
-    """
-    Updates projection- and transcript-level loss status dictionaries with
-    the data for the beforehand-rejected projections. Adds the new instance
-    if no instance of this projection or transcript was subjected to alignment,
-    leaves the best loss status otherwise
-    """
-    tr_from_rej_log: Set[str] = set()
-    for proj, rej_proj_status in reject_proj2status.items():
-        tr: str = "#".join(proj.split("#")[:-1])
-        if proj not in orig_proj2status:
-            orig_proj2status[proj] = rej_proj_status
-        else:
-            orig_proj_status: str = orig_proj2status[proj]
-            orig_proj2status[proj] = max(
-                (orig_proj_status, rej_proj_status), key=lambda x: CLASS_TO_NUM[x]
-            )
-        ## do not propagate rejected paralog statuses
-        if proj in paralogs or proj in ppgenes:
-            continue
-        rej_tr_status: str = reject_tr2status[tr]
-        if tr not in orig_tr2status:
-            tr_from_rej_log.add(tr)
-            orig_tr2status[tr] = rej_tr_status
-        ## do not account for items non-spanning items
-        elif rej_proj_status not in SPANNING_CLASSES:
-            continue
-        else:
-            orig_tr_status: str = orig_tr2status[tr]
-            orig_tr2status[tr] = max(
-                (orig_tr_status, rej_tr_status), key=lambda x: CLASS_TO_NUM[x]
-            )
-        if tr in precedence and orig_tr2status in SPANNING_CLASSES:
-            preferred_proj: str = precedence[tr]
-            if preferred_proj in orig_proj2status:
-                preferred_loss_status: str = orig_proj2status[preferred_proj]
-                orig_tr2status[tr] = preferred_loss_status
-            elif preferred_proj in reject_proj2status:
-                preferred_loss_status: str = reject_proj2status[preferred_proj]
-                orig_tr2status[tr] = preferred_loss_status
-            else:
-                raise KeyError(
-                    f"Top-precedent projection {preferred_proj} is absent "
-                    "from both transcript meta and rejection reports"
-                )
-            continue
-    for rej_tr, rej_tr_status in reject_tr2status.items():
-        if rej_tr not in orig_tr2status:
-            orig_tr2status[rej_tr] = rej_tr_status
-        else:
-            orig_tr_status: str = orig_tr2status.get(tr, "N")
-            ## TODO: This check is a safeguard for rare quirks
-            ## when both spanning and regular orthologous projections are encountered;
-            ## will be likely redundant in 2.1
-            if orig_tr_status == PG:
-                continue
-            orig_tr2status[tr] = max(
-                (orig_tr_status, rej_tr_status), key=lambda x: CLASS_TO_NUM[x]
-            )
-    return (orig_proj2status, orig_tr2status)
-
-
-def gene_loss_report(
-    file: Union[str, TextIO], tr_report: Dict[str, str]
-) -> Dict[str, str]:
-    """
-    Parses the TOGA-formatted isoform file to collapse transcript loss report
-    to gene level
-    """
-    gene2status: Dict[str, Set[str]] = defaultdict(set)
-    if not isinstance(file, str):
-        lines: List[str] = file.readlines()
-    else:
-        with open(file, "r") as h:
-            lines: List[str] = h.readlines()
-    for line in lines:
-        if line.startswith("GeneID"):
-            continue
-        gene, isoform = line.strip().split("\t")
-        gene2status[gene].add(tr_report.get(isoform, "N"))
-    for gene in gene2status:
-        all_classes: Set[str] = gene2status[gene]
-        max_class: str = max(all_classes, key=lambda x: CLASS_TO_NUM[x])
-        gene2status[gene] = max_class
-
-    return gene2status
-
+PROJECTION: Final[str] = "PROJECTION"
+TRANSCRIPT: Final[str] = "TRANSCRIPT"
+GENE: Final[str] = "GENE"
+CESAR_STEP_REJECT: Final[str] = "No exons were aligned"
+NO_EXONS: Final[str] = "NO_EXONS_FOUND"
+LOW_COV: Final[str] = "INSUFFICIENT_SEQ_COVERAGE"
+REDUNDANT_PARALOG: Final[str] = "REDUNDANT_PARALOG"
+REDUNDANT_PPGENE: Final[str] = "REDUNDANT_PPGENE"
+SECOND_BEST: Final[str] = "SECOND_BEST"
+IGNORED_ITEMS: Final[tuple[str, ...]] = ("REDUNDANT_PARALOG", "REDUNDANT_PPGENE", "SECOND_BEST")
+SPANNING_CLASSES: Final[tuple[str, ...]] = ("L", "M", "N")
+PG: Final[str] = "PG"
 
 @click.command(context_settings=CONTEXT_SETTINGS, no_args_is_help=True)
-@click.argument(
-    "transcript_meta", type=click.File("r", lazy=True), metavar="TRANSCRIPT_META"
+@click.option(
+    "--transcript_meta", 
+    type=click.File("r", lazy=True), 
+    metavar="TRANSCRIPT_META",
+    required=True,
+    help="Path to the transcript meta file"
 )
 @click.option(
     "--rejected_projections",
@@ -392,20 +97,6 @@ def gene_loss_report(
     ),
 )
 @click.option(
-    "--discarded_paralogs",
-    "-rp",
-    type=click.File("r", lazy=True),
-    metavar="DISCARDED_PARALOG_FILE",
-    default=None,
-    show_default=True,
-    help=(
-        "A single-column file containing names of discarded paralogous projections. "
-        "For transcripts which are annotated with paralogous projections alone, "
-        "only those which retain at least one non-discarded projections are kept for "
-        "transcript- and gene-level loss estimation"
-    ),
-)
-@click.option(
     "--output",
     "-o",
     type=click.File("w"),
@@ -413,64 +104,397 @@ def gene_loss_report(
     show_default=False,
     help="A path to store the output at [default: stdout]",
 )
-def main(
-    transcript_meta: click.File,
-    rejected_projections: Optional[click.File],
-    isoform_file: Optional[Union[click.File, None]],
-    paralogs: Optional[Union[click.File, None]],
-    processed_pseudogenes: Optional[Union[click.File, None]],
-    spanning_chains_precedence_file: Optional[Union[click.File, None]],
-    discarded_paralogs: Optional[Union[click.File, None]],
-    output: Optional[click.File],
-) -> None:
-    """
-    Summarises projection classification data based on TOGA results. Arguments are:\n
-    \tTRANSCRIPT_META is a projection metadata output TSV file of the CESAR wrapper
-    (transcript_meta.tsv for CESAR wrapper or combined_projection_meta.tsv for TOGA)\n
-    """
-    if spanning_chains_precedence_file:
-        spanning_status: Dict[str, str] = parse_precedence_file(
-            spanning_chains_precedence_file
-        )
-    else:
-        spanning_status: Dict[str, str] = {}
-    paralogs: Set[str] = parse_single_column(paralogs)
-    ppgenes: Set[str] = parse_single_column(processed_pseudogenes)
-    discarded_paralogs: Set[str] = parse_single_column(discarded_paralogs)
-    proj2status, tr2status, confirmed_rejected_paralogs = transcript_meta_to_report(
-        transcript_meta,
-        spanning_status,
-        paralogs=paralogs,
-        ppgenes=ppgenes,
-        discarded_paralogs=discarded_paralogs,
+@click.option(
+    "--log_name",
+    "-ln",
+    type=str,
+    metavar="STR",
+    default=None,
+    show_default=True,
+    help="Logger name to use; relevant only upon main class import",
+)
+@click.option(
+    "--verbose", "-v", is_flag=True, default=False, help="Control logging verbosity"
+)
+
+class ConservationSummary(CommandLineManager):
+    __slots__ = (
+        "gene2status",
+        "gene2trs",
+        "isoform_file",
+        "missing_paralogs",
+        "output",
+        "paralogs",
+        "potentially_missing_paralogs", 
+        "ppgenes",
+        "precedence",
+        "precedence_file",
+        "proj2status",
+        "rejected",
+        "rejection_file",
+        "second_bests",
+        "status_by_orth",
+        "tr2gene",
+        "tr2projs",
+        "tr2status",
+        "transcript_meta",
     )
-    if rejected_projections is not None:
-        with open(rejected_projections, "r") as h:
-            r_proj2status, r_tr2status = rejection_file_to_report(h)
-            proj2status, tr2status = add_rejection_data(
-                proj2status, 
-                tr2status, 
-                r_proj2status,
-                r_tr2status, 
-                spanning_status,
-                paralogs=paralogs,
-                ppgenes=ppgenes,
-            )
-    output.write(Headers.LOSS_FILE_HEADER)
-    for proj, status in proj2status.items():
-        output.write("\t".join((PROJECTION, proj, status)) + "\n")
-    for tr, status in tr2status.items():
-        output.write("\t".join((TRANSCRIPT, tr, status)) + "\n")
-    ## TODO: Make transcripts appearing in the isoform_file but not in the TOGA results be listed in output as N/M
-    if isoform_file is not None:
-        gene2status: Dict[str, str] = gene_loss_report(isoform_file, tr2status)
-        for gene, status in gene2status.items():
-            output.write("\t".join((GENE, gene, status)) + "\n")
-    if confirmed_rejected_paralogs and rejected_projections is not None:
-        with open(rejected_projections, "a") as h:
-            for transcript in confirmed_rejected_paralogs:
-                h.write(RejectionReasons.OUTCOMPETED_PARALOG_REASON.format(transcript) + "\n")
 
+    def __init__(
+        self,
+        transcript_meta: click.File,
+        rejected_projections: click.Path | None = None,
+        isoform_file: click.File | None = None,
+        paralogs: click.File | None = None,
+        processed_pseudogenes: click.File | None = None,
+        spanning_chains_precedence_file: click.File | None = None,
+        discarded_paralogs: click.File | None = None,
+        output: click.File | TextIO = stdout,
+        log_name: str | None = None,
+        verbose: bool = False,
+    ) -> None:
+        self.v: bool = verbose
+        self.set_logging(name=log_name, toga_module="conservation_summary")
 
-if __name__ == "__main__":
-    main()
+        self.transcript_meta: click.File = transcript_meta
+        self.rejection_file: click.Path | None = rejected_projections
+        self.isoform_file: click.File | None = isoform_file
+        self.precedence_file: click.File | None = spanning_chains_precedence_file
+        self.output: click.File | TextIO = output
+
+        self.paralogs: set[str] = parse_single_column(paralogs)
+        self.ppgenes: set[str] = parse_single_column(processed_pseudogenes)
+
+        self.gene2status: dict[str, str] = {}
+        self.gene2trs: dict[str, list[str]] = defaultdict(list)
+        self.missing_paralogs: set[str] = set()
+        self.potentially_missing_paralogs: set[str] = set()
+        self.precedence: dict[str, str] = {}
+        self.proj2status: dict[str, str] = {}
+        self.rejected: set[str] = set()
+        self.second_bests: set[str] = set()
+        self.tr2gene: dict[str, str] = {}
+        self.tr2projs: dict[str, list[str]] = defaultdict(list)
+        self.tr2status: dict[str, str] = {}
+
+        self.run()
+
+    def run(self) -> None:
+        """Entry point method"""
+        ## parse isoform file
+        self.parse_isoform_file()
+        ## read precedence file
+        self.parse_precedence_file()
+        ## parse rejection log
+        self.parse_rejection_file()
+        ## read transcript meta and perform the high-level analysis
+        self.parse_transcript_meta()
+        ## perform the transcript level analysis
+        self.classify_transcripts()
+        ## if isoform file was provided, perform the gene loss analysis
+        self.classify_genes()
+        ## write the results to the file
+        self.write_output()
+        ## if any items were discarded, write them to the respective files
+        self.write_rejected()
+
+    def parse_isoform_file(self) -> None:
+        """
+        Reads reference {gene: transcript} mapping
+
+        Arguments:
+            None
+
+        Returns:
+            None
+
+        Note:
+            1. If isoform file was not provided, exits without populating class attributes
+            2. Otherwise, populates ``self.tr2gene`` with {transcript -> gene} mapping, 
+            and ``self.gene2trs`` with {gene -> [transcripts]} mapping
+        """
+        if self.isoform_file is None:
+            return
+        for i, data in enumerate(read_tab(self.isoform_file), start=1):
+            if not data or not data[0]:
+                continue
+            if data[0] == "GeneID":
+                continue
+            if len(data) != 2:
+                self._die(
+                    f"Improper reference isoform file at line {i}: expected 2 fields, got {len(data)}"
+                )
+            gene, tr = data
+            if tr in self.tr2gene:
+                self._die(
+                    f"Transcript {tr} appears more than once in the reference isoform file; "
+                    f"first duplicate encountered at line {i}"
+                )
+            self.tr2gene[tr] = gene
+            self.gene2trs[gene].append(tr)
+
+    def parse_rejection_file(self) -> None:
+        """
+        Extracts projection and transcript annotation from rejection log file 
+
+        Arguments:
+            None
+
+        Returns:
+            None
+        """
+        if self.rejection_file is None:
+            return
+        for i, data in enumerate(read_tab(self.rejection_file), start=1):
+            if not data or not data[0]:
+                continue
+            if data[0] == "level":
+                continue
+            ## workaround for compatibility with bugged older versions 
+            if len(data) == 2:
+                name: str = data[0]
+                status: str = "N"
+                self.tr2status[name] = status
+                continue
+            level: str = data[0]
+            name: str = data[1]
+            ## the entire transcript has been discarded;
+            ## no reasons to expect further projections
+            status: str = data[5]
+            if level == TRANSCRIPT:
+                self.tr2status[name] = max((status, self.tr2status.get(name, "N")), key=lambda x: CLASS_TO_NUM[x])
+                continue
+            if level != PROJECTION:
+                raise ValueError(f"An ambiguous entry found at line {i}: {level}")
+            basename: str = base_proj_name(name)
+            is_paralog: bool = name in self.paralogs or basename in self.paralogs
+            is_ppgene: bool = name in self.ppgenes or basename in self.ppgenes
+            if is_paralog and is_ppgene:
+                self._die(
+                    f"Projection {name} at rejection file line {i} "
+                    "is considered both a paralog and a processed pseudogene"
+                )
+            tr: str = "#".join(name.split("#")[:-1])
+            reason: str = data[4]
+            if reason == SECOND_BEST:
+                self.second_bests.add(name)
+            ## save the projection name
+            self.rejected.add(name)
+            ## save the projections loss status
+            self.proj2status[name] = status
+            ## add projection to the transcript -> projections mapping
+            self.tr2projs[tr].append(name)
+
+    def parse_precedence_file(self) -> None:
+        """
+        Parses coordinates of spanning sections of spanning chain projections.
+
+        For each transcript covered by spanning chains, the tightest span is selected 
+        for projection loss station classification. Consider the following example:
+        ```
+        projection    ==============[***]=====[***]================
+        chain1        ----[]--------------------------------[]-----
+        chain2        -----------[]-----------------------------[]-
+        chain3        ---------[]--------------------[]------------
+        ```
+        In this example, chain 3 is selected as the best representative since its span 
+        (the distance between the two aligned blocks) is the smallest of all three chains 
+        considered.
+
+        Arguments:
+            None
+
+        Returns:
+            None
+        """
+        if self.precedence_file is None:
+            return
+        tr2curr_best: dict[str, tuple[str, int, int]] = {}
+        for i, data in enumerate(read_tab(self.precedence_file), start=1):
+            if not data or not data[0]:
+                continue
+            if data[0] == "projection":
+                continue
+            if len(data) < 4:
+                self._die(
+                    f"Improper precedence file formatting at line {i}: "
+                    f"expected at least 4 fields, got {len(data)}"
+                )
+            proj: str = data[0]
+            tr: str = "#".join(proj.split("#")[:-1])
+            # chrom: str = data[1]
+            start: int = int(data[2])
+            end: int = int(data[3])
+            if tr not in tr2curr_best:
+                tr2curr_best[tr] = (proj, start, end)
+            else:
+                prev_best_start, prev_best_end = tr2curr_best[tr][1:]
+                if end - start < prev_best_end - prev_best_start:
+                    tr2curr_best[tr] = (proj, start, end)
+        self.precedence = {k: v[0] for k, v in tr2curr_best.items()}
+
+    def parse_transcript_meta(self) -> None:
+        """
+        Reads transcript metadata file and extracts loss status classification
+
+        Arguments:
+            None
+
+        Returns:
+            None
+        """
+        ## extract the projection loss statuses
+        for i, data in enumerate(read_tab(self.transcript_meta), start=1):
+            if data[0] == "projection":
+                continue
+            proj: str = data[0]
+            basename: str = base_proj_name(proj)
+            is_paralog: bool = proj in self.paralogs or basename in self.paralogs
+            is_ppgene: bool = proj in self.ppgenes or basename in self.ppgenes
+            if is_paralog and is_ppgene:
+                self._die(
+                    f"Projection {proj} at transcript meta file {i} "
+                    "is considered both a paralog and a processed pseudogene"
+                )
+            ## save the projection's loss status
+            status: str = data[1]
+            self.proj2status[proj] = status
+            ## add projection to the transcript -> projections mapping
+            tr: str = "#".join(proj.split("#")[:-1])
+            self.tr2projs[tr].append(proj)
+
+    def classify_transcripts(self) -> None:
+        """
+        Classifies transcripts in terms of loss status.
+
+        By default, transcript loss status is defined as the highest loss status among 
+        its projections. Loss status precedence order is defined as followis:
+        ```
+        FI > I > PI > UL > L > M > N
+        ```
+        Note that special loss statuses PG (ParaloGous) and PP (Processed Pseudogene) do not 
+        participate in the transcript status classification; moreover, orthologous projections 
+        are expected never to have this loss status.
+
+        If a transcript does not have any following projections, the loss status is defined as follows:
+        * If a transcript has any spanning chains, the loss status is defined 
+        based on the the most compact span (see ``parse_precedence_file``);
+        * If a transcript has paralogous projections, it gets the PG status unless all the paralogous 
+        projections have been discarded, otherwise it gets the Missing (M) status
+        * Otherwise, the transcript gets Missing status
+
+        Arguments:
+            None
+
+        Returns:
+            None
+        """
+        for tr, projs in self.tr2projs.items():
+            if tr in self.tr2status:
+                continue
+            ppgenes: list[str] = [
+                x for x in projs if x in self.ppgenes or base_proj_name(x) in self.ppgenes
+            ]
+            paralogs: list[str] = [
+                x for x in projs if x in self.paralogs or base_proj_name(x) in self.paralogs
+            ]
+            orthologs: list[str] = [x for x in projs if x not in ppgenes and x not in paralogs]
+            ## if any ortholog is present, use them for loss status classification
+            if orthologs:
+                non_rejected: list[str] = [x for x in orthologs if x not in self.rejected]
+                if non_rejected:
+                    all_statuses: list[str] = [self.proj2status[x] for x in non_rejected]
+                    max_status: str = max(all_statuses, key=lambda x: CLASS_TO_NUM[x])
+                    self.tr2status[tr] = max_status
+                    continue
+                ## otherwise, check if there are any spanning chains recorded
+                ## (they must be also present in the rejection log file)
+                if tr in self.precedence:
+                    self.tr2status[tr] = self.proj2status[self.precedence[tr]]
+                    continue
+                ## otherwise, classify based on other rejected projections
+                rejected: list[str] = [x for x in orthologs if x not in non_rejected]
+                non_sb: list[str] = [x for x in rejected if  x not in self.second_bests]
+                if non_sb:
+                    all_statuses: list[str] = [self.proj2status[x] for x in non_sb]
+                    max_status: str = max(all_statuses, key=lambda x: CLASS_TO_NUM[x])
+                    if max_status != "N" or not paralogs:
+                        self.tr2status[tr] = max_status
+                        continue
+                elif rejected:
+                    self.tr2status[tr] = "M"
+            ## if there are any paralogs recorded, the transcript gets the "PG" status
+            if paralogs:
+                non_rejected: list[str] = [x for x in paralogs if x not in self.rejected]
+                if non_rejected:
+                    self.tr2status[tr] = "PG"
+                else:
+                    self.tr2status[tr] = "M"
+                    self.missing_paralogs.add(tr)
+                continue
+            ## if there are processed pseudogenes, assign the Missing status
+            if ppgenes:
+                self.tr2status[tr] = "M"
+                continue
+            # self._to_log(f"")
+            # self.tr2status[tr] = "M"
+            self._to_log(f"Transcript {tr} has no projections and is missing from the rejection file")
+
+    def classify_genes(self) -> None:
+        """
+        Classifies reference genes based on their transcripts' classification. 
+        The process is pretty straightforward and relies on the loss status 
+        precedence order only
+
+        Arguments:
+            None
+
+        Returns:
+            None
+        """
+        if not self.gene2trs:
+            return
+        for gene, trs in self.gene2trs.items():
+            all_statuses: list[str] = [self.tr2status.get(x, "N") for x in trs]
+            max_status: str = max(all_statuses, key=lambda x: CLASS_TO_NUM[x])
+            self.gene2status[gene] = max_status
+
+    def write_output(self) -> None:
+        """
+        Writes the results to the output file
+
+        Arguments:
+            None
+
+        Returns:
+            None
+        """
+        self.output.write(Headers.LOSS_FILE_HEADER)
+        self.output.writelines(
+            [f"{PROJECTION}\t{proj}\t{status}\n" for proj, status in sorted(self.proj2status.items())]
+        )
+        self.output.writelines(
+            [f"{TRANSCRIPT}\t{tr}\t{status}\n" for tr, status in sorted(self.tr2status.items())]
+        )
+        self.output.writelines(
+            [f"{GENE}\t{gene}\t{status}\n" for gene, status in sorted(self.gene2status.items())]
+        )
+
+    def write_rejected(self) -> None:
+        """
+        Appends rejection entries of transcripts with all their 
+        paralogous projections missing  to ``self.rejection_file``
+
+        Arguments:
+            None
+
+        Returns:
+            None
+        """
+        if not self.missing_paralogs:
+            return
+        if self.rejection_file is not None:
+            with open(self.rejection_file, "a") as h:
+                h.writelines([
+                    RejectionReasons.OUTCOMPETED_PARALOG_REASON.format(tr) + "\n" for tr in sorted(self.missing_paralogs)
+                ])

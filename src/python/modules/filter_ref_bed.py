@@ -1,37 +1,24 @@
-#!/usr/bin/env python3
-
 """
 Filters reference BED file for further use within the TOGA 2.0 pipeline
 """
 
 import os
 import sys
-from typing import List, Optional, Set, Tuple, Union
+from typing import Final
 
 import click
 
 from .constants import RejectionReasons
-from .shared import CONTEXT_SETTINGS, CommandLineManager
+from .shared import CONTEXT_SETTINGS, CommandLineManager, consistent_name
 
-LOCATION: str = os.path.dirname(os.path.abspath(__file__))
-PARENT: str = os.sep.join(LOCATION.split(os.sep)[:-1])
+LOCATION: Final[str] = os.path.dirname(os.path.abspath(__file__))
+PARENT: Final[str] = os.sep.join(LOCATION.split(os.sep)[:-1])
 sys.path.extend([LOCATION, PARENT])
 
 __author__ = "Yury V. Malovichko"
 __year__ = "2024"
 __credits__ = "Bogdan M. Kirilenko"
-__all__ = None
-
-ALLOWED_CHARSET: Tuple[int, ...] = tuple(
-    [35, *range(45, 59), *range(65, 91), 95, *range(97, 123), 124]
-)
-
-
-def consistent_name(name: str) -> bool:
-    """
-    Checks whether only the allowed symbols are used in the transcript name
-    """
-    return all(ord(x) in ALLOWED_CHARSET for x in name)
+__all__ = ()
 
 
 @click.command(context_settings=CONTEXT_SETTINGS, no_args_is_help=True)
@@ -103,12 +90,12 @@ class AnnotationFilter(CommandLineManager):
     """
 
     __slots__ = [
-        "ref_bed",
-        "output",
-        "rejection_log",
         "approved_contigs",
         "excluded_contigs",
         "no_frame_filter",
+        "output",
+        "ref_bed",
+        "rejection_log",
         "v",
     ]
 
@@ -117,11 +104,11 @@ class AnnotationFilter(CommandLineManager):
         ref_bed: click.File,
         output: click.File,
         rejection_log: click.File,
-        contigs: Optional[Union[str, None]],
-        excluded_contigs: Optional[Union[str, None]],
-        disable_frame_filter: Optional[bool],
-        log_name: Optional[str],
-        verbose: Optional[bool],
+        contigs: str | None = None,
+        excluded_contigs: str | None = None,
+        disable_frame_filter: bool = False,
+        log_name: str | None = None,
+        verbose: bool = False,
     ) -> None:
         self.v: bool = verbose
         self.set_logging(name=log_name, toga_module="ref_bed_filter")
@@ -129,20 +116,29 @@ class AnnotationFilter(CommandLineManager):
         self.ref_bed: click.File = ref_bed
         self.output: click.File = output
         self.rejection_log: click.File = rejection_log
-        self.approved_contigs: Union[List[str], None] = (
+        self.approved_contigs: str | None = (
             [x for x in contigs.split(",") if x] if contigs else None
         )
-        self.excluded_contigs: Union[List[str], None] = (
+        self.excluded_contigs: list[str] | None = (
             [x for x in excluded_contigs.split(",") if x] if excluded_contigs else None
         )
         self.no_frame_filter: bool = disable_frame_filter
         self.run()
 
     def run(self) -> None:
-        """ """
-        transcript_names: Set[str] = set()
+        """
+        Entry point: filters input BED file, writes the approved items to the output BED file 
+        and adds the rejected items to the rejection log
+
+        Arguments:
+            None
+
+        Returns:
+            None
+        """
+        transcript_names: set[str] = set()
         for i, line in enumerate(self.ref_bed, start=1):
-            data: List[str] = line.strip().split("\t")
+            data: list[str] = line.strip().split("\t")
             ## ignore blank lines
             if not data:
                 continue
@@ -169,7 +165,7 @@ class AnnotationFilter(CommandLineManager):
             ## apply the respective filters
             if self.approved_contigs is not None and chrom not in self.approved_contigs:
                 self._to_log(
-                    "Transcript %s is located on a deprecated contig" % chrom, "warning"
+                    f"Transcript {chrom} is located on a deprecated contig", "warning"
                 )
                 self.rejection_log.write(
                     RejectionReasons.CONTIG_REJ_REASON.format(name) + "\n"
@@ -177,7 +173,7 @@ class AnnotationFilter(CommandLineManager):
                 continue
             if self.excluded_contigs is not None and chrom in self.excluded_contigs:
                 self._to_log(
-                    "Transcript %s is located on a deprecated contig" % chrom, "warning"
+                    f"Transcript {chrom} is located on a deprecated contig", "warning"
                 )
                 self.rejection_log.write(
                     RejectionReasons.CONTIG_REJ_REASON.format(name) + "\n"
@@ -199,10 +195,10 @@ class AnnotationFilter(CommandLineManager):
                 continue
             ## iterate over exon entries to infer the CDS length
             frame_length: int = 0
-            sizes: List[int] = [
+            sizes: list[int] = [
                 int(x) for x in data[10].split(",") if x
             ]  # list(map(int, data[10].split(',')[:-1]))
-            starts: List[int] = [
+            starts: list[int] = [
                 int(x) for x in data[11].split(",") if x
             ]  # list(map(int, data[11].split(',')[:-1]))
             for start, size in zip(starts, sizes):
