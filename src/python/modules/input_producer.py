@@ -1530,7 +1530,9 @@ class InputProducer(CommandLineManager):
                     continue
                 corr_name: str = self.rename_map.get(name, name)
                 if not self.no_gene_suffix:
-                    corr_name = f"{corr_name}#{self.tr2gene[name]}"
+                    gene: str = self.tr2gene[name]
+                    gene = self.rename_map.get(gene, gene)
+                    corr_name = f"{corr_name}#{gene}"
                 line: str = tr.line
                 line = line.replace(name, corr_name)
                 if name in self.immune:
@@ -1571,7 +1573,7 @@ class InputProducer(CommandLineManager):
                 for tr in trs:
                     tr_name: str = self.rename_map.get(tr, tr)
                     if not self.no_gene_suffix:
-                        tr_name = f"{tr_name}#{gene}"
+                        tr_name = f"{tr_name}#{gene_name}"
                     if tr in self.immune:
                         i_iso.write(f"{gene_name}\t{tr_name}\n")
                         immune = True
