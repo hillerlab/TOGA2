@@ -20,6 +20,7 @@ __year__ = "2024"
 __credits__ = "Bogdan M. Kirilenko"
 __all__ = ()
 
+TRANSCRIPT: Final[str] = "TRANSCRIPT"
 
 @click.command(context_settings=CONTEXT_SETTINGS, no_args_is_help=True)
 @click.argument("ref_bed", type=click.File("r", lazy=True), metavar="REF_BED")
@@ -152,7 +153,7 @@ class AnnotationFilter(CommandLineManager):
             ## reject the transcripts
             if not consistent_name(name):
                 self.rejection_log.write(
-                    RejectionReasons.NAME_REJ_REASON.format(name) + "\n"
+                    RejectionReasons.NAME_REJ_REASON.format(TRANSCRIPT,name) + "\n"
                 )
                 continue
             if name in transcript_names:
