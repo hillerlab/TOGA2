@@ -160,7 +160,7 @@ class ModelTrainer(CommandLineManager):
         df["intr_perc"] = df["intr_cover"] / df["intr_fract"]
         df = df.fillna(0.0)
         df["single_exon"] = df["ex_num"] == 1
-        X: pd.core.frame.DataFrame = df[Constants.LD_MODEL_FEATURES].copy()
+        X: pd.core.frame.DataFrame = df[list(Constants.LD_MODEL_FEATURES)].copy()
         y: pd.core.series.Series = df["y"].copy()
         ## liftoff!
         self._train(X, y, self.ld_path, name="long-distance", long_distance=True)
