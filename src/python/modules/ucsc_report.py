@@ -7,7 +7,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass  ## TODO: HIGHLY REDUNDANT
 from typing import Any, TextIO
 
-from modules.cesar_wrapper_constants import (
+from .cesar_wrapper_constants import (
     COMPENSATION,
     DEL_EXON,
     DEL_MISS,
@@ -15,8 +15,8 @@ from modules.cesar_wrapper_constants import (
     MISS_EXON,
     SSM,
 )
-from modules.cesar_wrapper_executables import Mutation
-from modules.shared import parts
+from .cesar_wrapper_executables import Mutation
+from .shared import parts
 
 __author__ = "Yury V. Malovichko"
 __credits__ = ("Bogdan Kirilenko", "Björn Langer", "Michael Hiller")
