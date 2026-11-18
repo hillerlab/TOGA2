@@ -3,12 +3,14 @@
 
 Works like xenoRefGenelx.pl"""
 
-from typing import Set
-import click
 import sys
-from shared import CommandLineManager, CONTEXT_SETTINGS, read_tab
 
-# from version import __version__
+import click
+
+if __package__:
+    from .shared import CONTEXT_SETTINGS, CommandLineManager, read_tab
+else:  # direct script execution
+    from shared import CONTEXT_SETTINGS, CommandLineManager, read_tab
 
 @click.command(context_settings=CONTEXT_SETTINGS, no_args_is_help=True)
 @click.option(
@@ -64,7 +66,7 @@ class BedNameRetriever(CommandLineManager):
         self.set_logging(name=log_name, toga_module="bed_name_extractor")
         self._to_log("Starting BedNameRetriever")
 
-        out_set: Set[str] = set()
+        out_set: set[str] = set()
         for i, data in enumerate(read_tab(input), start=1):
         # with open(input, "r") as h:
         # for i, line in enumerate(input, start=1):
@@ -73,10 +75,8 @@ class BedNameRetriever(CommandLineManager):
             #     continue
             if len(data) < 4:
                 self._die(
-                    (
-                        "Improper number of fields in the BED file at line %i; "
-                        "expected at least 4 fields, got %i"
-                    ) % (i, len(data))
+                    f"Improper number of fields in the BED file at line {i}; "
+                    f"expected at least 4 fields, got {len(data)}"
                 )
             id_field: str = data[3]
             no_chain_id = "#".join(id_field.split("#")[:-1])
@@ -95,22 +95,3 @@ class BedNameRetriever(CommandLineManager):
 if __name__ == "__main__":
     BedNameRetriever()
 
-
-# if len(sys.argv) != 2:
-#     to_read = None
-#     sys.exit(f"Usage: {sys.argv[0]} [query_annotation.bed] | sort -u > ix.txt")
-# else:
-#     to_read = sys.argv[1]
-
-# f = open(to_read, "r")
-# for line in f:
-#     id_field = line.rstrip().split("\t")[3]
-#     no_chain_id = "#".join(id_field.split("#")[:-1])
-#     dot_split = no_chain_id.split("#")
-#     if len(dot_split) > 1:
-#         to_out = [id_field, no_chain_id] + dot_split
-#     else:
-#         to_out = [id_field, no_chain_id]
-#     line = "\t".join(to_out)
-#     print(line)
-# f.close()
