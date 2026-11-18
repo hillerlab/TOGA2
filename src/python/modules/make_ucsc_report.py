@@ -5,9 +5,9 @@ prepares a complete UCSC BigBed report file
 
 import os
 from collections import defaultdict
+from typing import Any, TextIO
 
 import click
-from Typing import Any, TextIO
 
 from .get_names_from_bed import BedNameRetriever
 from .shared import (
