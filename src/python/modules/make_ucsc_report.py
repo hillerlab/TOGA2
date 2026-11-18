@@ -24,7 +24,6 @@ __credits__ = ("Bogdan Kirilenko", "Björn Langer", "Michael Hiller")
 __year__ = "2024"
 
 LOCATION: str = os.path.dirname(os.path.abspath(__file__))
-MAKE_IX_SCRIPT: str = os.path.join(LOCATION, "get_names_from_bed.py")
 BR: str = "<BR>"
 DEFAULT_UCSC_PREFIX: str = "HLTOGAannot"
 FRAGM_PROJ_MAIN_STUB: str = "Chain {}: {} <I>(this locus)</I>"
