@@ -1,5 +1,3 @@
-#!/usr/bin/env python3
-
 """
 Given the extended BED files produced at the TOGA alignment step,
 prepares a complete UCSC BigBed report file
@@ -7,12 +5,11 @@ prepares a complete UCSC BigBed report file
 
 import os
 from collections import defaultdict
-from get_names_from_bed import BedNameRetriever
-from typing import Any, Dict, List, Optional, Set, TextIO, Tuple, Union
 
 import click
-from ucsc_report import REF_LINK_PLACEHOLDER
+from Typing import Any, TextIO
 
+from .get_names_from_bed import BedNameRetriever
 from .shared import (
     CONTEXT_SETTINGS,
     CommandLineManager,
@@ -20,17 +17,17 @@ from .shared import (
     get_proj2trans,
     parse_single_column,
 )
+from .ucsc_report import REF_LINK_PLACEHOLDER
 
 __author__ = "Yury V. Malovichko"
 __credits__ = ("Bogdan Kirilenko", "Björn Langer", "Michael Hiller")
 __year__ = "2024"
 
 LOCATION: str = os.path.dirname(os.path.abspath(__file__))
-MAKE_IX_SCRIPT: str = os.path.join(LOCATION, "get_names_from_bed.py")
 BR: str = "<BR>"
 DEFAULT_UCSC_PREFIX: str = "HLTOGAannot"
 FRAGM_PROJ_MAIN_STUB: str = "Chain {}: {} <I>(this locus)</I>"
-INTACT_COLORS: Tuple[str, str] = ("0,0,100", "0,0,200")
+INTACT_COLORS: tuple[str, str] = ("0,0,100", "0,0,200")
 # FRAGM_PROJ_ADD_STUB: str = (
 #     'Chain {}: <a href="{}" target="_blank">{}</a><BR>'
 # )
@@ -184,30 +181,29 @@ class BigBedProducer(CommandLineManager):
     """
 
     __slots__ = (
-        "prefix",
-        "proj2backbone",
-        "ref2coords",
-        "proj2features",
-        "proj2score",
-        "ref2link",
         "alt_bed_track",
-        "chrom_sizes",
-        "schema",
-        "output_dir",
-        "out_bed_file",
-        "bigbed_file",
         "bed_index",
+        "bedtobigbed_binary",
+        "bigbed_file",
         "bigbed_index",
         "bigbed_ixx",
-        "longest_word",
-        # 'make_pp_track', '', '', '',
+        "chrom_sizes",
         "deprecated_projs",
-        "paralogs",
-        "ppgenes",
-        "bedtobigbed_binary",
         "ixixx_binary",
         "log_file",
         "log_name",
+        "longest_word",
+        "out_bed_file",
+        "output_dir",
+        "paralogs",
+        "ppgenes",
+        "prefix",
+        "proj2backbone",
+        "proj2features",
+        "proj2score",
+        "ref2coords",
+        "ref2link",
+        "schema",
     )
 
     def __init__(
@@ -219,19 +215,17 @@ class BigBedProducer(CommandLineManager):
         chrom_sizes: click.Path,
         schema: click.Path,
         output_dir: click.Path,
-        alternative_bed_track: Optional[Union[click.File, None]],
-        link_file: Optional[Union[click.File, None]],
-        deprecated_projections: Optional[Union[click.File, None]],
-        paralogs: Optional[Union[click.File, None]],
-        processed_pseudogenes: Optional[Union[click.File, None]],
-        # make_processed_pseudogene_track: Optional[bool],
-        bedtobigbed_binary: Optional[click.Path],
-        ixixx_binary: Optional[click.Path],
-        prefix: Optional[str],
-        # pseudogene_prefix: Optional[str],
-        log_file: Optional[click.Path],
-        log_name: Optional[str],
-        verbose: Optional[bool],
+        alternative_bed_track: click.File | None,
+        link_file: click.File | None,
+        deprecated_projections: click.File | None,
+        paralogs: click.File | None,
+        processed_pseudogenes: click.File | None,
+        bedtobigbed_binary: click.Path | None,
+        ixixx_binary: click.Path | None,
+        prefix: str | None,
+        log_file: click.Path | None,
+        log_name: str | None,
+        verbose: bool = False,
     ) -> None:
         self.v: bool = verbose
         self.log_file: click.Path = log_file
@@ -240,31 +234,31 @@ class BigBedProducer(CommandLineManager):
 
         # self.prefix: str = prefix
         self.longest_word: int = 0
-        self.proj2backbone: Dict[str, Dict[str, List[str]]] = defaultdict(dict)
+        self.proj2backbone: dict[str, dict[str, list[str]]] = defaultdict(dict)
         self._to_log("Parsing UCSC BED file stub")
         self.parse_backbone_bed(stub)
-        self.ref2coords: Dict[str, str] = {}
+        self.ref2coords: dict[str, str] = {}
         self._to_log("Extracting reference coordinates from the reference BED file")
         self.parse_ref_bed(ref_bed)
-        self.proj2features: Dict[str, Tuple[float]] = {}
+        self.proj2features: dict[str, tuple[float]] = {}
         self._to_log("Extracting the necessary projection features")
         self.parse_projection_features(projection_features)
-        self.proj2score: Dict[str, str] = {}
+        self.proj2score: dict[str, str] = {}
         self._to_log("Extracting orthology probabilities")
         self.parse_scores(orthology_scores)
-        self.ref2link: Dict[str, str] = {}
+        self.ref2link: dict[str, str] = {}
         if link_file is not None:
             self._to_log("Parsing reference link file")
             self.parse_links(link_file)
         if deprecated_projections is not None:
             self._to_log("Parsing the list of deprecated projections")
-        self.alt_bed_track: Dict[str, List[str]] = {}
+        self.alt_bed_track: dict[str, list[str]] = {}
         if alternative_bed_track is not None:
             self._to_log("Parsing alternative Bed track")
             self.parse_alt_bed(alternative_bed_track)
-        self.deprecated_projs: Set[str] = parse_single_column(deprecated_projections)
-        self.paralogs: Set[str] = parse_single_column(paralogs)
-        self.ppgenes: Set[str] = parse_single_column(processed_pseudogenes)
+        self.deprecated_projs: set[str] = parse_single_column(deprecated_projections)
+        self.paralogs: set[str] = parse_single_column(paralogs)
+        self.ppgenes: set[str] = parse_single_column(processed_pseudogenes)
         self.chrom_sizes: click.Path = chrom_sizes
         self.schema: click.Path = schema
         self.output_dir: click.Path = output_dir
@@ -303,7 +297,7 @@ class BigBedProducer(CommandLineManager):
         """Main method"""
         self._to_log("Creating UCSC output directory")
         self._mkdir(self.output_dir)
-        sorted_projs: List[Tuple[str, str, List[str]]] = sorted(
+        sorted_projs: list[tuple[str, str, list[str]]] = sorted(
             [y for x in self.proj2backbone.values() for y in x.items()],
             key=lambda x: (x[1][0], int(x[1][1])),
         )
@@ -322,11 +316,9 @@ class BigBedProducer(CommandLineManager):
                 tr: str = get_proj2trans(proj)[0]
                 ref_coords: str = self.ref2coords.get(tr, "")
                 if not ref_coords:
-                    self._die(
-                        "Transcript %s is missing from the reference BED file" % tr
-                    )
+                    self._die(f"Transcript {tr} is missing from the reference BED file")
                 if "," in proj:
-                    query_coords: List[str] = [
+                    query_coords: list[str] = [
                         FRAGM_PROJ_MAIN_STUB.format(
                             chain, f"{backbone[0]}:{backbone[1]}-{backbone[2]}"
                         )
@@ -342,26 +334,21 @@ class BigBedProducer(CommandLineManager):
                     query_coords: str = BR.join(query_coords)
                     _proj: str = f"{tr}#{chain}"
                     orth_score: str = self.proj2score.get(_proj, "")
-                    proj_features: List[str] = self.proj2features.get(_proj, [])
+                    proj_features: list[str] = self.proj2features.get(_proj, [])
                 else:
                     orth_score: str = self.proj2score.get(basename, "")
-                    proj_features: List[str] = self.proj2features.get(basename, [])
+                    proj_features: list[str] = self.proj2features.get(basename, [])
                     query_coords: str = f"{backbone[0]}:{backbone[1]}-{backbone[2]}"
                 if not orth_score:
-                    self._die(
-                        "Projection %s is missing from the orthology score file" % proj
-                    )
+                    self._die(f"Projection {proj} is missing from the orthology score file")
                 if not proj_features:
-                    self._die(
-                        "Projection %s is missing from the projection feature file"
-                        % proj
-                    )
+                    self._die(f"Projection {proj} is missing from the projection feature file")
                 link: str = self.ref2link.get(tr, REF_LINK_PLACEHOLDER)
                 if basename in self.ppgenes and "#retro" not in proj:
                     backbone[3] = backbone[3] + "#retro"
                 elif basename in self.paralogs and "#paralog" not in proj:
                     backbone[3] = backbone[3] + "#paralog"
-                out_line: List[Any] = [
+                out_line: list[Any] = [
                     *backbone[:4],
                     "1000",
                     *backbone[5:12],
@@ -410,13 +397,12 @@ class BigBedProducer(CommandLineManager):
     def parse_backbone_bed(self, file: TextIO) -> None:
         """Parses extended BED output from the CESAR alignment step"""
         for i, line in enumerate(file, 1):
-            data: List[str] = line.rstrip().split("\t")
+            data: list[str] = line.rstrip().split("\t")
             if not data or not data[0]:
                 continue
             if len(data) < 26:
                 self._die(
-                    "Line %i in extended BED file does not contain expected number of columns (24)"
-                    % i
+                    f"Line {i} in extended BED file does not contain expected number of columns (24)"
                 )
             proj: str = data[3]
             chain: str = data[4]
@@ -426,13 +412,12 @@ class BigBedProducer(CommandLineManager):
     def parse_ref_bed(self, file: TextIO) -> None:
         """Extracts reference transcript coordinates from the BED file"""
         for i, line in enumerate(file, 1):
-            data: List[str] = line.rstrip().split("\t")
+            data: list[str] = line.rstrip().split("\t")
             if not data or not data[0]:
                 continue
             if len(data) < 4:
                 self._die(
-                    "Line %i in the reference BED file does not contain expected number of columns (4)"
-                    % i
+                    f"Line {i} in the reference BED file does not contain expected number of columns (4)"
                 )
             chrom: str = data[0]
             if len(data) >= 7:
@@ -444,21 +429,18 @@ class BigBedProducer(CommandLineManager):
             name: str = data[3]
             self.ref2coords[name] = f"{chrom}:{start}-{end}"
 
-    def parse_alt_bed(self, file: Union[TextIO, None]) -> None:
+    def parse_alt_bed(self, file: TextIO | None) -> None:
         """If provided, parses an alternative Bed12 track file"""
         if file is None:
             return
         for i, line in enumerate(file, 1):
-            data: List[str] = line.rstrip().split("\t")
+            data: list[str] = line.rstrip().split("\t")
             if not data or not data[0]:
                 continue
             if len(data) != 12:
                 self._die(
-                    (
-                        "Line %i in the alternative Bed12 file is improperly formatted; "
-                        "expected 12 lines, got %i"
-                    )
-                    % (i, len(data))
+                    f"Line {i} in the alternative Bed12 file is improperly formatted; "
+                    f"expected 12 lines, got {len(data)}"
                 )
             name: str = base_proj_name(data[3])
             self.alt_bed_track[name] = data
@@ -466,7 +448,7 @@ class BigBedProducer(CommandLineManager):
     def parse_projection_features(self, file: TextIO) -> None:
         """Extracts selected projection features from the feature table"""
         for line in file:
-            data: List[str] = line.rstrip().split("\t")
+            data: list[str] = line.rstrip().split("\t")
             if len(data) < 16:
                 self._die(
                     "Classification feature file differs from the expected format"
@@ -509,13 +491,12 @@ class BigBedProducer(CommandLineManager):
     def parse_scores(self, file: TextIO) -> None:
         """Extracts projection orthology probabilities"""
         for i, line in enumerate(file, 1):
-            data: List[str] = line.rstrip().split("\t")
+            data: list[str] = line.rstrip().split("\t")
             if not data or not data[0]:
                 continue
             if len(data) < 3:
                 self._die(
-                    "Line %i in the orthology score file does not contain expected number of columns (3)"
-                    % i
+                    f"Line {i} in the orthology score file does not contain expected number of columns (3)"
                 )
             tr: str = data[0]
             if tr == "transcript":
@@ -527,20 +508,19 @@ class BigBedProducer(CommandLineManager):
                 float(prob)
             except ValueError:
                 self._die(
-                    "Column 3 at line %i does not contain a valid probability value" % i
+                    f"Column 3 at line {i} does not contain a valid probability value"
                 )
             self.proj2score[proj] = prob
 
     def parse_links(self, file: TextIO) -> None:
         """Extracts links to external sources for reference transcripts"""
         for i, line in enumerate(file, 1):
-            data: List[str] = line.rstrip().split("\t")
+            data: list[str] = line.rstrip().split("\t")
             if not data or not data[0]:
                 continue
             if len(data) < 2:
                 self._die(
-                    "Line %i in the reference link file does not contain expected number of columns (2)"
-                    % i
+                    f"Line {i} in the reference link file does not contain expected number of columns (2)"
                 )
             name: str = data[0]
             link: str = data[1]

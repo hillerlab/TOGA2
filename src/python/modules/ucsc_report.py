@@ -3,10 +3,11 @@ A collection of constants and executables related to UCSC BigBed report formatti
 """
 
 from collections import defaultdict
+from collections.abc import Iterable
 from dataclasses import dataclass  ## TODO: HIGHLY REDUNDANT
-from typing import Any, Dict, Iterable, List, Optional, Set, TextIO, Tuple
+from typing import Any, TextIO
 
-from modules.cesar_wrapper_constants import (
+from .cesar_wrapper_constants import (
     COMPENSATION,
     DEL_EXON,
     DEL_MISS,
@@ -14,15 +15,15 @@ from modules.cesar_wrapper_constants import (
     MISS_EXON,
     SSM,
 )
-from modules.cesar_wrapper_executables import Mutation
-from modules.shared import parts
+from .cesar_wrapper_executables import Mutation
+from .shared import parts
 
 __author__ = "Yury V. Malovichko"
 __credits__ = ("Bogdan Kirilenko", "Björn Langer", "Michael Hiller")
 __year__ = "2024"
 
 ## define the constants
-ABBR2STATUS: Dict[str, str] = {
+ABBR2STATUS: dict[str, str] = {
     "FI": "Fully intact",
     "I": "Intact",
     "PI": "Partially intact",
@@ -33,7 +34,7 @@ ABBR2STATUS: Dict[str, str] = {
     "PG": "Paralogous projection",
     "PP": "Processed pseudogene",
 }
-MUT_SLOTS_TO_IGNORE: Tuple[str, ...] = ("projection", "chrom", "start", "stop")
+MUT_SLOTS_TO_IGNORE: tuple[str, ...] = ("projection", "chrom", "start", "stop")
 OUT_OF_CHAIN_PLACEHOLDER: float = 0.0
 BR: str = "<BR>"
 BOX_START: str = "<TT>"
@@ -72,10 +73,10 @@ FS_INS = "FS_INS"
 BIG_DEL = "BIG_DEL"
 BIG_INS = "BIG_INS"
 INTRON_GAIN: str = "INTRON_GAIN"
-INDELS: Tuple[str, ...] = (FS_DEL, FS_INS, BIG_DEL, BIG_INS, INTRON_GAIN)
-BIG_INDELS: Tuple[str, ...] = (BIG_DEL, BIG_INS, INTRON_GAIN)
-INS: Tuple = (FS_INS, BIG_INS)
-DELS: Tuple[str, ...] = (FS_DEL, BIG_DEL)
+INDELS: tuple[str, ...] = (FS_DEL, FS_INS, BIG_DEL, BIG_INS, INTRON_GAIN)
+BIG_INDELS: tuple[str, ...] = (BIG_DEL, BIG_INS, INTRON_GAIN)
+INS: tuple = (FS_INS, BIG_INS)
+DELS: tuple[str, ...] = (FS_DEL, BIG_DEL)
 STOP: str = "STOP"
 # (ag)acceptor-EXON-donor(gt)
 SSM_D: str = "SSMD"  # Donor, right, GT,GC
@@ -182,9 +183,9 @@ def _td(string: str) -> str:
 def format_fasta_as_aln(
     seq1: str,
     seq2: str,
-    w: Optional[int] = 80,
-    protein: Optional[bool] = False,
-    bp_num: Optional[int] = None,
+    w: int = 80,
+    protein: bool = False,
+    bp_num: int | None = None,
 ) -> str:
     """Formats two strings as alignment pseudographics"""
     out_line: str = BOX_START
@@ -194,16 +195,14 @@ def format_fasta_as_aln(
         bp_num = bp_num if bp_num is not None else "X"
         header_line = PROTEIN_HEADER.format(aa_num, bp_num)
     out_line += header_line
-    chunked_aln: List[List[Tuple[str]]] = parts(list(zip(seq1, seq2)), w)
+    chunked_aln: list[list[tuple[str]]] = parts(list(zip(seq1, seq2)), w)
     for portion in chunked_aln:
-        s1: str = "".join((x[0].upper() for x in portion))
+        s1: str = "".join(x[0].upper() for x in portion)
         middle: str = "".join(
-            (
-                SPACE if x[0].upper() != x[1].upper() or x[0] == "-" else "|"
-                for x in portion
-            )
+            SPACE if x[0].upper() != x[1].upper() or x[0] == "-" else "|"
+            for x in portion
         )
-        s2: str = "".join((x[1].upper() for x in portion))
+        s2: str = "".join(x[1].upper() for x in portion)
         out_line += PROTEIN_ALN_LINE.format(s1, middle, s2)
     out_line += BOX_END
     return out_line
@@ -222,7 +221,25 @@ def exon_aln_header(
     gap_intersection: bool,
     aln_class: str,
 ) -> str:
-    """ """
+    """
+    Creates a header for an exon alignment entry
+
+    Arguments:
+        exon: int, exon number
+        chrom: str, chromosome/contig/scaffold/etc. name
+        start: int, exon start in the query
+        end: int, exon end in the query
+        exp_start: int, expected exon start in the query
+        exp_end: int, expected exon end in the query
+        found_in_exp: bool, specifies whether the exon was found in the chain-defined location
+        nuc_id: float, nucleotide identity to the reference
+        blosum: float, BLOSUM protein identity to the reference
+        gap_intersection: bool, specifies whether the exon's search space contains and exon gap
+        aln_class: str, alignment quality class identifier
+
+    Returns:
+        str, exon alignment entry header
+    """
     number: str = EXON_NUMBER.format(5, exon, 5)
     region: str = EXON_REGION.format(chrom, start, end)
     nuc_id = round(nuc_id, 2)
@@ -239,7 +256,7 @@ def exon_aln_header(
     return header
 
 
-def mutation_table(muts: List[Mutation]) -> str:
+def mutation_table(muts: list[Mutation]) -> str:
     """Given a list of Mutation objects, prepares an HTML data table"""
     out_line: str = ""
     for mut in muts:
@@ -267,14 +284,14 @@ def exon_aln_entry(seq1: str, seq2: str, header: str) -> str:
 
 def get_chain_features(
     file: TextIO, str, proj_list: Iterable[str] = []
-) -> Dict[str, Tuple[str]]:
+) -> dict[str, tuple[str]]:
     """
     Extracts feature values from the chain_results_df.tsv TOGA output file,
     returns the {projection: (feature_tuple)} dictionary
     """
-    proj2features: Dict[str, Tuple[str]] = {}
+    proj2features: dict[str, tuple[str]] = {}
     for line in TextIO:
-        data: List[str] = line.rstrip().split("\t")
+        data: list[str] = line.rstrip().split("\t")
         if len(data) != 16:
             raise ValueError(
                 "Classification feature file differs from the expected format"
@@ -330,7 +347,7 @@ class IntronDash:
 
 @dataclass
 class ExonBox:
-    __slots__ = ["num", "color", "x", "y", "width", "height"]
+    __slots__ = ["color", "height", "num", "width", "x", "y"]
     num: int
     color: str
     x: float
@@ -346,7 +363,7 @@ class ExonBox:
 
 @dataclass
 class TextStack:
-    __slots__ = ["x", "y", "label", "size", "color"]
+    __slots__ = ["color", "label", "size", "x", "y"]
     x: float
     y: float
     label: str
@@ -361,7 +378,7 @@ class TextStack:
 
 @dataclass
 class Insertion:
-    __slots__ = ["length", "x", "y", "masked"]
+    __slots__ = ["length", "masked", "x", "y"]
     length: int
     x: float
     y: float
@@ -386,7 +403,7 @@ class Insertion:
 
 @dataclass
 class BlockMutation:
-    __slots__ = ["x", "y", "width", "height", "color"]
+    __slots__ = ["color", "height", "width", "x", "y"]
     x: float
     y: float
     width: float
@@ -400,59 +417,49 @@ class BlockMutation:
 
 
 class ProjectionPlotter:
-    # __slots__ = [
-    #     'ref_tr', 'projection', 'mutations', 'fragm2ex',
-    #     'max_width', 'max_height', 'exon2muts', 'compensation2fs',
-    #     'mut_masked', 'mut_label', 'missing_exons', 'deleted_exons',
-    #     'last_exon', 'tr_label'
-    # ]
     def __init__(
         self,
         tr: str,
-        ref_tr: Dict[int, int],
+        ref_tr: dict[int, int],
         # projection: Iterable[ProjectionFeatures],
         mutations: Iterable[Mutation],
-        exon2chain: Dict[int, str],
+        exon2chain: dict[int, str],
     ) -> None:
         self.tr_label: str = tr
-        self.ref_tr: Dict[int, int] = ref_tr
+        self.ref_tr: dict[int, int] = ref_tr
         # self.projection: Iterable[ProjectionFeatures] = projection
         self.mutations: Iterable[Mutation] = mutations
-        self.fragm2ex: Dict[int, List[int]] = defaultdict(list)
+        self.fragm2ex: dict[int, list[int]] = defaultdict(list)
         for x, y in exon2chain.items():
             self.fragm2ex[y].append(x)
         self.max_width: int = 0
         self.max_height: int = 0
-        self.exon2muts: Dict[int, List[str]] = defaultdict(list)
-        self.exon2comps: Dict[int, List[str]] = defaultdict(list)
-        self.mut2position: Dict[str, int] = {}
-        self.mut_masked: Dict[str, bool] = {}
-        self.mut_label: Dict[str, str] = {}
-        self.mut2comp: Dict[str, str] = {}
-        self.comp2mut: Dict[str, Set[str]] = defaultdict(list)
-        self.mut2exon: Dict[str, int] = {}
-        self.missing_exons: Set[int] = set()
-        self.critical_deletions: Set[int] = set()
-        self.safe_deletions: Set[int] = set()
+        self.exon2muts: dict[int, list[str]] = defaultdict(list)
+        self.exon2comps: dict[int, list[str]] = defaultdict(list)
+        self.mut2position: dict[str, int] = {}
+        self.mut_masked: dict[str, bool] = {}
+        self.mut_label: dict[str, str] = {}
+        self.mut2comp: dict[str, str] = {}
+        self.comp2mut: dict[str, set[str]] = defaultdict(list)
+        self.mut2exon: dict[str, int] = {}
+        self.missing_exons: set[int] = set()
+        self.critical_deletions: set[int] = set()
+        self.safe_deletions: set[int] = set()
         self.last_exon: int = max(ref_tr)
-        # chain_postfix: str = ','.join(map(str, sorted(self.fragm2ex, key=lambda x: min(self.fragm2ex[x]))))
-        # self.tr_label: str = f'{self.ref_tr.transcript}#{chain_postfix}'
 
-        self.exon_boxes: Dict[int, ExonBox] = {}
-        self.regular_intron_dashes: Dict[int, IntronDash] = {}
-        self.terminal_intron_dashes: Dict[int, IntronDash] = {}
-        self.mut_objects: Dict[str, Any] = {}
+        self.exon_boxes: dict[int, ExonBox] = {}
+        self.regular_intron_dashes: dict[int, IntronDash] = {}
+        self.terminal_intron_dashes: dict[int, IntronDash] = {}
+        self.mut_objects: dict[str, Any] = {}
 
         self._run()
 
     def _run(self) -> None:
-        """ """
+        """Entry point"""
         self._compute_plot_width()
         self._compute_plot_height()
         self._prepare_mutations()
         self._generate_filebuffer()
-        # svg = self.plot_svg()
-        # print(svg)
 
     def _compute_plot_width(self) -> None:  ## DONE!
         """
@@ -466,7 +473,7 @@ class ProjectionPlotter:
         add_ids: bool = len(self.fragm2ex) > 1
         longest_chain_label: int = max(len(str(x)) for x in self.fragm2ex)
         ## for each fragment, calculate the width of the respective subplot
-        for fragm, exons in self.fragm2ex.items():
+        for exons in self.fragm2ex.values():
             gene_width: int = (
                 2 * HORIZONTAL_OFFSET
                 + (CHAIN_ID_FONTSIZE * longest_chain_label * FONT_ASPECT_RATIO + 5.0)
@@ -584,9 +591,7 @@ class ProjectionPlotter:
                     else:
                         self.critical_deletions.add(ex)
                 else:
-                    raise Exception(
-                        "Missing/Deleted exon meta is corrupted for %i" % ex
-                    )
+                    raise RuntimeError(f"Missing/Deleted exon meta is corrupted for {ex}" )
                 for m_ in self.exon2muts[ex]:
                     if m_ in self.mut2exon:
                         del self.mut2exon[m_]
@@ -597,7 +602,7 @@ class ProjectionPlotter:
                 self.exon2muts[ex].clear()
             ## FAFO how to handle splice shift mutations
             elif mut_class in SSM:
-                sites: List[str] = mut_meta.split("->")
+                sites: list[str] = mut_meta.split("->")
                 query_site: str = "--" if len(sites) < 2 else sites[1]
                 self.mut_label[mut_id] = query_site
                 self.mut_masked[mut_id] = masked
@@ -614,10 +619,10 @@ class ProjectionPlotter:
         Generates the file buffer, i.e. lines standing for actual graphic
         representation in the resulting SVG file
         """
-        self.buffer_lines: List[
+        self.buffer_lines: list[
             str
         ] = []  ## TODO: Should the buffer be kep as a string by default?
-        fragms: List[int] = sorted(
+        fragms: list[int] = sorted(
             self.fragm2ex.keys(), key=lambda x: min(self.fragm2ex[x])
         )
         add_labels: bool = len(self.fragm2ex) > 1
@@ -629,7 +634,7 @@ class ProjectionPlotter:
         else:
             chain_id_offset: float = 0.0
         for i, fragm in enumerate(fragms, start=1):
-            exons: Set[int] = self.fragm2ex[fragm]
+            exons: set[int] = self.fragm2ex[fragm]
             first_ex: int = min(exons)
             last_ex: int = max(exons)
             ## estimate the x coordinate
@@ -863,7 +868,7 @@ class ProjectionPlotter:
         For a given Compensation entry, return the SVG line depicting an arc
         connecting the compensating frameshif mutations
         """
-        compensated_muts: List[str] = [
+        compensated_muts: list[str] = [
             x for x in self.comp2mut[id] if x in self.mut2exon
         ]
         for i, first_mut in enumerate(compensated_muts[:-1]):
