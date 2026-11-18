@@ -8,7 +8,6 @@ from collections import defaultdict
 
 import click
 from Typing import Any, TextIO
-from ucsc_report import REF_LINK_PLACEHOLDER
 
 from .get_names_from_bed import BedNameRetriever
 from .shared import (
@@ -18,6 +17,7 @@ from .shared import (
     get_proj2trans,
     parse_single_column,
 )
+from .ucsc_report import REF_LINK_PLACEHOLDER
 
 __author__ = "Yury V. Malovichko"
 __credits__ = ("Bogdan Kirilenko", "Björn Langer", "Michael Hiller")
