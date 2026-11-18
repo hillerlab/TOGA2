@@ -7,10 +7,10 @@ import os
 from collections import defaultdict
 
 import click
-from get_names_from_bed import BedNameRetriever
 from Typing import Any, TextIO
 from ucsc_report import REF_LINK_PLACEHOLDER
 
+from .get_names_from_bed import BedNameRetriever
 from .shared import (
     CONTEXT_SETTINGS,
     CommandLineManager,
